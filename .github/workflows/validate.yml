@@ -1,0 +1,19 @@
+name: Platform CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: platform-ci-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - run: ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.yml").each { |path| YAML.load_file(path) }'

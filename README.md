@@ -4,7 +4,7 @@ Shared automation for independently managed application repositories. Published 
 
 ## Available interface
 
-.github/workflows/project-checks.yml is a reusable Ubuntu quality job. It checks out the caller's code and invokes sh scripts/ci.sh, with read-only contents permission, no persisted checkout credentials and a 20-minute timeout.
+.github/workflows/project-checks.yml is a reusable Ubuntu quality job. It checks out the caller's code and invokes python3 scripts/run_ci.py, with read-only contents permission, no persisted checkout credentials and a 20-minute timeout, and seven-day report artifacts even on failure. New consumers must include scripts/run_ci.py from the template. Older consumers remain pinned to older workflow commits.
 Application scripts own tool setup, frozen dependency installation and real checks. Never call this workflow with secrets or a self-hosted personal Mac runner.
 
 Mason approved creation of both private repositories. Shared workflow access is enabled for repositories owned by themasonbanks; Actions may expose workflow logs/content to collaborators of consuming repositories. Consumers must pin a reviewed full commit SHA, enable cross-repository Actions access where needed and verify a failing and repaired test PR.
