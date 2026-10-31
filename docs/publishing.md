@@ -2,8 +2,8 @@
 
 Owner approves repository creation, visibility, billing and access first. Proposed repositories:
 agentic-project-template (GitHub template repository) and agentic-platform (shared workflows and infrastructure).
-Do not infer public visibility. No remote repositories have been created by this scaffold.
+Do not infer public visibility. Mason approved private repository creation. Both repositories are published under themasonbanks; agentic-project-template has template mode enabled.
 
-After approval, initialise each directory as its own Git repository, inspect the complete diff, commit on a KEB-118 branch and publish to the approved owner/visibility. Enable template mode for agentic-project-template.
+Initial scaffold commits were published on main into the new empty repositories. Use issue branches and PRs for subsequent implementation. Template mode is enabled. Owner-scoped access to the private shared workflow is enabled.
 Verify shared-workflow access from a disposable consumer repository; pin the caller to the reviewed platform commit SHA.
 Record measured adoption evidence in the template's docs/adoption-evidence.md.

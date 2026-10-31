@@ -10,4 +10,4 @@ No changes were made to Stockpot or its worktrees by this task.
 
 Linear still lists KEB-120/122 as Todo; existing files alone do not prove all acceptance criteria. Reconcile statuses only after hosted and human-review evidence is verified.
 
-KEB-118 remaining: owner-approved remote repository creation, permissions, independent review and measured fresh-repo adoption under 30 minutes.
+Both private repositories were created with owner approval. Remaining KEB-118 evidence: independent review, hosted workflow consumption/failure verification and measured fresh-repo adoption under 30 minutes.
