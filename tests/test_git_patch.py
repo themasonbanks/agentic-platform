@@ -60,3 +60,16 @@ class GitPatchTests(unittest.TestCase):
         self.git('restore', '--', 'src/calculate.py')
         with self.assertRaises(ValueError):
             inspect_patch(self.root, self.head, patch, {'src'})
+
+    def test_executable_to_regular_mode_change_rejected(self):
+        self.git('update-index', '--chmod=+x', 'src/calculate.py')
+        self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'executable fixture')
+        head = self.git('rev-parse', 'HEAD').decode().strip()
+        patch = self.git('-c', 'core.fileMode=true', 'diff', '--no-ext-diff')
+        self.assertIn(b'old mode 100755', patch)
+        self.assertIn(b'new mode 100644', patch)
+        before = self.git('status', '--porcelain')
+        with self.assertRaisesRegex(ValueError, 'mode changes'):
+            inspect_patch(self.root, head, patch, {'src'})
+        self.assertEqual(self.git('status', '--porcelain'), before)

@@ -48,6 +48,8 @@ def inspect_patch(repository, expected_head, patch, allowed_roots):
         for offset in range(0, len(fields) - 1, 2):
             header = fields[offset].decode('ascii').split()
             path = fields[offset + 1].decode('utf-8', errors='strict')
+            if header[4] == 'M' and header[0].lstrip(':') != header[1]:
+                raise ValueError('File mode changes require human review')
             operation = {'A': 'add', 'M': 'modify'}.get(header[4], 'unsupported')
             files.append(ChangedFile(path, operation, header[1]))
         validate_manifest(files, allowed_roots)
