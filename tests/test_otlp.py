@@ -1,6 +1,12 @@
 """Verify protobuf transport acknowledgements against a controlled HTTP receiver."""
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from contextlib import closing
+import hashlib
+import hmac
+import io
+import json
 import sqlite3
+import tempfile
 import threading
 import unittest
 from unittest.mock import patch
@@ -9,6 +15,10 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 from telemetry.events import EventStore
 from telemetry.otel import export_pending
 from telemetry.otlp import OtlpExporter
+from telemetry.mapping import IssueResolver
+from telemetry.metrics import render_metrics
+from telemetry.service import create_application
+from telemetry.sources import codex_turn
 
 
 class OtlpTests(unittest.TestCase):
@@ -75,3 +85,54 @@ class OtlpTests(unittest.TestCase):
                 ('https://example.com/v1/traces', 'Basic fixture\r\nOther: value', 'example.com')]:
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 OtlpExporter(endpoint, credential, host)
+
+    def test_four_sources_flow_through_durable_store_to_correlated_otlp_and_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = directory + '/events.db'
+            secret = b'local-integration-fixture-secret-' * 2
+            resolver = IssueResolver({('owner/app', 3): 'KEB-130'}, {})
+            app = create_application(lambda: sqlite3.connect(path), secret, {'owner/app': 42},
+                                     resolver, secret, 'org', {'issue': ('owner/app', 'KEB-130')},
+                                     {'state': 'done'}, now_ms=lambda: 1000000)
+            def deliver(route, payload, event=None):
+                body = json.dumps(payload).encode()
+                signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
+                env = {'PATH_INFO': route, 'REQUEST_METHOD': 'POST',
+                       'CONTENT_TYPE': 'application/json', 'CONTENT_LENGTH': str(len(body)),
+                       'wsgi.input': io.BytesIO(body)}
+                if event:
+                    env.update(HTTP_X_GITHUB_EVENT=event, HTTP_X_HUB_SIGNATURE_256='sha256=' + signature)
+                else:
+                    env['HTTP_LINEAR_SIGNATURE'] = signature
+                statuses = []
+                list(app(env, lambda status, headers: statuses.append(status)))
+                self.assertEqual(statuses, ['200 OK'])
+            repo = {'repository': {'full_name': 'owner/app'}, 'installation': {'id': 42}}
+            deliver('/webhooks/github', dict(repo, action='opened', pull_request={
+                'number': 3, 'merged': False, 'state': 'open', 'body': 'private-fixture-marker',
+                'updated_at': '2026-11-01T12:00:00Z', 'head': {'sha': 'a' * 40}}), 'pull_request')
+            deliver('/webhooks/github', dict(repo, workflow_run={
+                'id': 9, 'run_attempt': 1, 'status': 'completed', 'conclusion': 'success',
+                'head_sha': 'a' * 40, 'updated_at': '2026-11-01T12:01:00Z',
+                'pull_requests': [{'number': 3}]}), 'workflow_run')
+            deliver('/webhooks/linear', {'organizationId': 'org', 'webhookTimestamp': 1000000,
+                                        'type': 'Issue', 'action': 'update', 'data': {
+                                            'id': 'issue', 'stateId': 'state',
+                                            'updatedAt': '2026-11-01T12:02:00Z',
+                                            'description': 'private-fixture-marker'}})
+            with closing(sqlite3.connect(path)) as db:
+                store = EventStore(db)
+                codex_turn(store, {'type': 'turn.completed', 'usage': {'input_tokens': 11,
+                           'output_tokens': 4}, 'prompt': 'private-fixture-marker'},
+                           'turn', 'owner/app', 'KEB-130', 'run', 'a' * 40, 1000000)
+                self.assertEqual(export_pending(store, self.exporter), 4)
+                self.assertEqual(store.pending(), [])
+                metrics = render_metrics(db, ['owner/app'])
+                self.assertIn('type="input"} 11\n', metrics)
+                self.assertIn('attempt="1",outcome="success"} 1\n', metrics)
+            spans = [ExportTraceServiceRequest.FromString(body).resource_spans[0].scope_spans[0].spans[0]
+                     for _, _, body in self.requests]
+            self.assertEqual(len({span.trace_id for span in spans}), 1)
+            self.assertEqual(len({span.span_id for span in spans}), 4)
+            self.assertEqual({span.name.split('.')[1] for span in spans}, {'agent', 'ci', 'github', 'linear'})
+            self.assertNotIn(b'private-fixture-marker', b''.join(body for _, _, body in self.requests))
