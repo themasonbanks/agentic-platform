@@ -40,7 +40,18 @@ jobs:
           terraform_version: 1.17.1
       - run: terraform fmt -check -recursive
       - run: terraform init -backend=false -input=false -lockfile=readonly
-      - run: terraform validate
+      - name: Initialize caller-provider validation fixture
+        if: matrix.root == 'terraform/modules/hosting_environment'
+        run: terraform -chdir=tests/validation init -backend=false -input=false -lockfile=readonly
+      - name: Validate configured provider bindings
+        env:
+          TERRAFORM_ROOT: ${{ matrix.root }}
+        run: |
+          if test "$TERRAFORM_ROOT" = terraform/modules/hosting_environment; then
+            terraform -chdir=tests/validation validate
+          else
+            terraform validate
+          fi
       - run: terraform test -no-color
   security:
     uses: ./.github/workflows/security-checks.yml
