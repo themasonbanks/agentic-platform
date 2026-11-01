@@ -6,7 +6,7 @@ import sqlite3
 
 SOURCES = {'agent', 'ci', 'github', 'linear'}
 KINDS = {'queued', 'running', 'success', 'failure', 'opened', 'merged', 'closed',
-         'backlog', 'todo', 'in_progress', 'done', 'cancelled'}
+         'backlog', 'todo', 'in_progress', 'done', 'cancelled', 'skipped', 'neutral', 'unknown'}
 NUMBERS = {'pr', 'duration_ms', 'retry_count', 'input_tokens', 'output_tokens', 'cost_microusd'}
 IDENTIFIERS = {'run_id', 'sha', 'model'}
 
