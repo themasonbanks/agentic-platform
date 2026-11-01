@@ -4,10 +4,12 @@ import hmac
 import io
 import json
 import sqlite3
+import tempfile
 import unittest
 from telemetry.events import EventStore
 from telemetry.http import application
 from telemetry.linear import receive_issue
+from telemetry.service import create_application
 
 
 class HttpTests(unittest.TestCase):
@@ -57,3 +59,32 @@ class HttpTests(unittest.TestCase):
         status, body = self.request(application({'/linear': fail}))
         self.assertEqual(status, '503 Service Unavailable')
         self.assertNotIn(b'private', body)
+
+    def test_service_routes_signed_github_to_shared_durable_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = directory + '/events.db'
+            connections = []
+            def connect():
+                db = sqlite3.connect(path)
+                connections.append(db)
+                return db
+            secret = b'fixture-only-webhook-secret' * 2
+            app = create_application(connect, secret, {'owner/app': 42},
+                                     lambda *args: 'KEB-130', secret, 'org',
+                                     {'issue': ('owner/app', 'KEB-130')}, {'state': 'done'})
+            body = json.dumps({'repository': {'full_name': 'owner/app'},
+                               'installation': {'id': 42}, 'action': 'opened',
+                               'pull_request': {'number': 3, 'merged': False, 'state': 'open',
+                                                'updated_at': '2026-11-01T12:00:00Z',
+                                                'head': {'sha': 'a' * 40}}}).encode()
+            signature = 'sha256=' + hmac.new(secret, body, hashlib.sha256).hexdigest()
+            for _ in range(2):
+                self.assertEqual(self.request(app, body, PATH_INFO='/webhooks/github',
+                                              HTTP_X_GITHUB_EVENT='pull_request',
+                                              HTTP_X_HUB_SIGNATURE_256=signature)[0], '200 OK')
+            self.assertEqual(len(connections), 2)
+            for db in connections:
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    db.execute('SELECT 1')
+            with sqlite3.connect(path) as db:
+                self.assertEqual(len(EventStore(db).pending()), 1)
