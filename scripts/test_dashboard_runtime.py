@@ -152,7 +152,8 @@ def main(output):
             docker('pull', image, timeout=240)
         user = f'{os.getuid()}:{os.getgid()}'
         common = ['--user', user, '--read-only', '--cap-drop', 'ALL',
-                  '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--cpus', '1']
+                  '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--cpus', '1',
+                  '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=256m']
         mount = ['--mount', f'type=bind,src={directory},dst=/fixture,readonly']
         data = ['--mount', f'type=bind,src={directory / "data"},dst=/prometheus']
         docker('run', '--rm', '--network', 'none', *common, '--memory', '512m', *mount, *data,
@@ -168,7 +169,7 @@ def main(output):
         containers.append(grafana_name)
         docker('run', '-d', '--name', grafana_name, '--network', prefix, *common, '--memory', '1g',
                '--tmpfs', f'/var/lib/grafana:uid={os.getuid()},gid={os.getgid()}',
-               '--tmpfs', '/tmp', '-p', '127.0.0.1::3000', *mount,
+               '-p', '127.0.0.1::3000', *mount,
                '-e', 'GF_PATHS_PROVISIONING=/fixture/provisioning',
                '-e', 'GF_AUTH_ANONYMOUS_ENABLED=true', '-e', 'GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer',
                '-e', 'GF_SECURITY_ADMIN_PASSWORD=' + uuid.uuid4().hex,
