@@ -1,0 +1,4 @@
+aws_account_id    = "123456789012"
+state_bucket_name = "replace-with-reviewed-globally-unique-name"
+github_repository = "themasonbanks/stockpot"
+github_oidc_subject_prefix = "repo:themasonbanks@79837282/stockpot@1319669903"
