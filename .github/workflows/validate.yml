@@ -21,6 +21,19 @@ jobs:
       - run: ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.yml").each { |path| YAML.load_file(path) }'
       - run: python3 scripts/test_security_policy.py
       - run: python3 -m unittest discover -s tests -v
+  isolation:
+    name: Container isolation probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - run: docker pull busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+      - run: python3 -m unittest discover -s tests -p test_container.py -v
+        env:
+          VERIFY_CONTAINER_ISOLATION: "1"
+          WORKER_SECRET_CANARY: host-only-fixture
   security:
     uses: ./.github/workflows/security-checks.yml
     permissions:
@@ -30,13 +43,15 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [validate, security]
+    needs: [validate, security, isolation]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
       VALIDATION: ${{ needs.validate.result }}
       SECURITY: ${{ needs.security.result }}
+      ISOLATION: ${{ needs.isolation.result }}
     steps:
       - run: |
           test "$VALIDATION" = success
           test "$SECURITY" = success
+          test "$ISOLATION" = success
