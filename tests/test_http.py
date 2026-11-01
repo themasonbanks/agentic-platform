@@ -1,5 +1,6 @@
 """Exercise HTTP transport rejection and durable signed delivery replay."""
 import hashlib
+from contextlib import closing
 import hmac
 import io
 import json
@@ -86,5 +87,5 @@ class HttpTests(unittest.TestCase):
             for db in connections:
                 with self.assertRaises(sqlite3.ProgrammingError):
                     db.execute('SELECT 1')
-            with sqlite3.connect(path) as db:
+            with closing(sqlite3.connect(path)) as db:
                 self.assertEqual(len(EventStore(db).pending()), 1)

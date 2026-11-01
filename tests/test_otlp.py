@@ -1,0 +1,77 @@
+"""Verify protobuf transport acknowledgements against a controlled HTTP receiver."""
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import sqlite3
+import threading
+import unittest
+from unittest.mock import patch
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+    ExportTraceServiceRequest, ExportTraceServiceResponse)
+from telemetry.events import EventStore
+from telemetry.otel import export_pending
+from telemetry.otlp import OtlpExporter
+
+
+class OtlpTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(':memory:')
+        self.addCleanup(self.db.close)
+        self.store = EventStore(self.db)
+        self.store.append('github', 'fixture', 'owner/app', 'KEB-130', 'opened', 1000000, {'pr': 3})
+        self.status, self.response, self.requests = 200, b'', []
+        owner = self
+        class Receiver(BaseHTTPRequestHandler):
+            def do_POST(self):
+                owner.requests.append((self.path, self.headers,
+                                       self.rfile.read(int(self.headers['Content-Length']))))
+                self.send_response(owner.status)
+                self.send_header('Location', '/redirected')
+                self.send_header('Content-Length', str(len(owner.response)))
+                self.end_headers()
+                self.wfile.write(owner.response)
+
+            def log_message(self, *args):
+                pass
+        with patch('socket.getfqdn', return_value='localhost'):
+            server = HTTPServer(('127.0.0.1', 0), Receiver)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        def close():
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        self.addCleanup(close)
+        self.exporter = OtlpExporter(f'http://127.0.0.1:{server.server_port}/v1/traces',
+                                     None, '127.0.0.1', local_fixture=True)
+        self.addCleanup(self.exporter.shutdown)
+
+    def test_success_delivers_real_protobuf_and_acknowledges_outbox(self):
+        self.assertEqual(export_pending(self.store, self.exporter), 1)
+        path, headers, body = self.requests[0]
+        self.assertEqual(path, '/v1/traces')
+        self.assertEqual(headers['Content-Type'], 'application/x-protobuf')
+        self.assertIsNone(headers.get('Authorization'))
+        request = ExportTraceServiceRequest.FromString(body)
+        span = request.resource_spans[0].scope_spans[0].spans[0]
+        self.assertEqual(span.name, 'engineering.github.opened')
+        self.assertEqual(self.store.pending(), [])
+
+    def test_redirect_error_and_partial_rejection_keep_outbox_pending(self):
+        partial = ExportTraceServiceResponse()
+        partial.partial_success.rejected_spans = 1
+        for status, response in [(302, b''), (401, b''), (503, b''),
+                                 (200, partial.SerializeToString()), (200, b'invalid protobuf')]:
+            with self.subTest(status=status, response=response):
+                self.status, self.response = status, response
+                before = len(self.requests)
+                self.assertEqual(export_pending(self.store, self.exporter), 0)
+                self.assertEqual(len(self.store.pending()), 1)
+                self.assertEqual(len(self.requests), before + 1)
+
+    def test_destination_and_credential_validation(self):
+        for endpoint, credential, host in [
+                ('http://example.com/v1/traces', 'Basic fixture', 'example.com'),
+                ('https://other.example/v1/traces', 'Basic fixture', 'example.com'),
+                ('https://example.com/v1/traces?token=fixture', 'Basic fixture', 'example.com'),
+                ('https://example.com/v1/traces', 'Basic fixture\r\nOther: value', 'example.com')]:
+            with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
+                OtlpExporter(endpoint, credential, host)
