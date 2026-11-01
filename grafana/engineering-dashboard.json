@@ -948,7 +948,7 @@
           "type": "prometheus",
           "uid": "${metrics}"
         },
-        "query": "label_values(agentic_runs_total, repository)",
+        "query": "label_values(agentic_metric_source_events_total, repository)",
         "includeAll": true,
         "allValue": ".*",
         "multi": true,
