@@ -53,6 +53,7 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 -m venv "$RUNNER_TEMP/dashboard-env"
+      - run: python3 scripts/test_alert_rules.py
       - run: '"$RUNNER_TEMP/dashboard-env/bin/python" -m pip install -r grafana/runtime-requirements.txt'
       - run: '"$RUNNER_TEMP/dashboard-env/bin/python" -m playwright install --with-deps chromium'
       - run: '"$RUNNER_TEMP/dashboard-env/bin/python" scripts/test_dashboard_runtime.py --output "$RUNNER_TEMP/dashboard-evidence"'

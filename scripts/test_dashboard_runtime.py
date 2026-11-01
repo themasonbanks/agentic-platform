@@ -13,6 +13,7 @@ import time
 from urllib.parse import urlencode
 from urllib.request import build_opener, ProxyHandler
 import uuid
+from test_alert_rules import fixture_files
 
 ROOT = Path(__file__).resolve().parents[1]
 GRAFANA = 'grafana/grafana@sha256:6e5d306338670f381a942f1c50d3c266bf71531e5ddd9ee4fc1a133dac5ce63d'
@@ -186,6 +187,7 @@ def main(output):
     try:
         directory = Path(temporary.name)
         start, end = generate(directory)
+        alert_cases = fixture_files(directory)
         report.update(start=start, end=end)
         for image in (PROMETHEUS, GRAFANA):
             docker('pull', image, timeout=240)
@@ -195,6 +197,9 @@ def main(output):
                   '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=256m']
         mount = ['--mount', f'type=bind,src={directory},dst=/fixture,readonly']
         data = ['--mount', f'type=bind,src={directory / "data"},dst=/prometheus']
+        docker('run', '--rm', '--network', 'none', *common, '--memory', '512m', *mount,
+               '--entrypoint', '/bin/promtool', PROMETHEUS, 'test', 'rules', '/fixture/alert-tests.json')
+        report['alert_cases'] = alert_cases
         docker('run', '--rm', '--network', 'none', *common, '--memory', '512m', *mount, *data,
                '--entrypoint', '/bin/promtool', PROMETHEUS, 'tsdb', 'create-blocks-from',
                'openmetrics', '/fixture/metrics.om', '/prometheus')
