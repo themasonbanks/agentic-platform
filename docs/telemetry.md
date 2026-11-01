@@ -101,3 +101,22 @@ The stable identity is repository/PR/review ID, independent of delivery ID. A re
 Eight new tests cover decisions, legacy inline evidence, body-only/rate notices, missing adapter, signature/installation/mapping rejection, replay without API calls, malformed evidence, ignored actions, logical duplicates/conflicts and repository isolation. The existing four-source HTTP/protobuf integration now carries six events, including two signed review submissions with duplicate deliveries, and verifies retained confirmed/unclassified totals after export. The full local suite passed51 tests; changed review and actual loopback/protobuf tests were rechecked after the live API adjustment. A read-only CLI-authenticated probe verified two CodeRabbit commented reviews on Stockpot PR7 had linked inline comments. This is metadata-adapter evidence, not approved App transport, signed live delivery, Cloud export or production review completeness. No GitHub comment, review or remote configuration was changed.
 
 References: https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review and https://docs.github.com/en/rest/pulls/reviews#list-comments-for-a-pull-request-review .
+
+## Durable receipt timing and source health
+
+Every newly accepted event now gets a receiver timestamp and an independent monotonic SQLite receipt sequence in the same transaction as its event row. The trusted writer clock supplies nanoseconds; webhook/agent attributes cannot select this receipt time. The sequence orders committed receipts even when a source timestamp is late or the receiver wall clock goes backwards. Duplicate deliveries never insert or refresh a receipt, and outbox acknowledgements never delete one. This timestamp measures durable ingestion, including database queuing, not initial socket arrival or later export completion.
+
+The read-only metric projection selects the latest receipt sequence per repository/source and emits bounded gauges alongside the existing counters:
+
+| Metric | Meaning |
+| --- | --- |
+| agentic_source_lag_seconds | Durable receipt minus source timestamp for the latest accepted event, omitted when timing is invalid/unverified |
+| agentic_source_receipt_age_seconds | Current scrape time minus latest receipt; quiet sources age even if their last delivery was quick |
+| agentic_source_timing_valid | One when latest source/receipt/scrape order is consistent and receipt time has not regressed below that repository/source history; otherwise zero |
+| agentic_source_clock_skew_seconds | Source time ahead of receipt time, otherwise zero; zero does not prove clock synchronization |
+
+A late source event may increase delivery lag without replacing receipt order. A future source timestamp, scrape clock behind the latest receipt, or per-source receiver clock regression makes timing unknown; negative latency is never clamped into healthy zero lag. Scrape/receiver/source clock synchronization still requires external monitoring and reconciliation. These gauges describe observed sources only, not missing expected providers or guaranteed completeness. Configure expected sources and heartbeat/idle thresholds before alerting on silence; no idle threshold is guessed here.
+
+For upgrade, initialize the writer once with the new EventStore schema before starting the read-only metrics service. The additive engineering_receipts table does not backfill timestamps for existing events. A legacy source with no measured receipt exposes timing_valid zero and no lag/age sample; replaying an old event does not invent its arrival time. A subsequent genuinely new event can establish a current measurement without repairing historical coverage. Missing schema or invalid stored receipt metadata makes a scrape fail closed. Retain event/receipt history and use an explicit restoration/counter/timing reconciliation plan; restoring an older database is not a normal reset.
+
+Six new real-SQLite tests cover measured delay versus idle age, duplicate freshness, out-of-order source timestamps, future/regressed clocks and recovery, repository/source separation, recreated stores, invalid clock rollback and legacy schema upgrade. Counter stability tests freeze the scrape clock because age gauges intentionally change over time. Production clocks, source completeness and Grafana ingestion remain unverified; no live account, credential, retention or alert route was changed.

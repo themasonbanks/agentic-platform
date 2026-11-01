@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import time
 
 SOURCES = {'agent', 'ci', 'github', 'linear'}
 KINDS = {'queued', 'running', 'success', 'failure', 'opened', 'merged', 'closed',
@@ -12,8 +13,10 @@ IDENTIFIERS = {'run_id', 'sha', 'model', 'review_state', 'review_classification'
 
 
 class EventStore:
-    def __init__(self, db: sqlite3.Connection):
-        self.db = db
+    def __init__(self, db: sqlite3.Connection, clock=time.time_ns):
+        if not callable(clock):
+            raise ValueError('Trusted receiver clock required')
+        self.db, self.clock = db, clock
         db.execute('''CREATE TABLE IF NOT EXISTS engineering_events (
             source TEXT NOT NULL, event_id TEXT NOT NULL, observed_ns INTEGER NOT NULL,
             trace_id TEXT NOT NULL, span_id TEXT NOT NULL, payload TEXT NOT NULL,
@@ -21,6 +24,10 @@ class EventStore:
         db.execute('''CREATE TABLE IF NOT EXISTS engineering_export_claims (
             source TEXT NOT NULL, event_id TEXT NOT NULL, worker TEXT NOT NULL,
             expires_ns INTEGER NOT NULL, PRIMARY KEY(source,event_id))''')
+        db.execute('''CREATE TABLE IF NOT EXISTS engineering_receipts (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL,
+            event_id TEXT NOT NULL, received_ns INTEGER NOT NULL,
+            UNIQUE(source,event_id))''')
         db.commit()
 
     def append(self, source, event_id, repository, issue, kind, observed_ns, attributes):
@@ -65,8 +72,13 @@ class EventStore:
                 if existing[0] != encoded:
                     raise ValueError('Conflicting duplicate event')
                 return False
+            received_ns = self.clock()
+            if type(received_ns) is not int or not 0 <= received_ns <= 9_223_372_036_854_775_807:
+                raise ValueError('Bounded integer receiver timestamp required')
             self.db.execute('INSERT INTO engineering_events VALUES(?,?,?,?,?,?,0)',
                             (source, event_id, observed_ns, trace_id, span_id, encoded))
+            self.db.execute('INSERT INTO engineering_receipts(source,event_id,received_ns) VALUES(?,?,?)',
+                            (source, event_id, received_ns))
         return True
 
     def pending(self, limit=100):

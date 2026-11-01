@@ -23,23 +23,23 @@ class MetricsTests(unittest.TestCase):
         self.add('ci', 'skip', 'skipped', {'run_id': '3', 'retry_count': 0})
         self.add('ci', 'other', 'success', {'run_id': '1', 'retry_count': 0}, 'owner/other')
         self.assertFalse(self.add('ci', 'two', 'success', {'run_id': '2', 'retry_count': 0}))
-        text = render_metrics(self.db, ['owner/app'])
+        text = render_metrics(self.db, ['owner/app'], now_ns=2_000_000_000_000_000_000)
         self.assertIn('agentic_ci_attempts_total{repository="owner/app",attempt="1",outcome="success"} 1\n', text)
         self.assertIn('agentic_ci_attempts_total{repository="owner/app",attempt="1",outcome="failure"} 1\n', text)
         self.assertIn('agentic_ci_attempts_total{repository="owner/app",attempt="retry",outcome="success"} 1\n', text)
         self.assertNotIn('owner/other', text)
-        self.assertEqual(text, render_metrics(self.db, ['owner/app']))
+        self.assertEqual(text, render_metrics(self.db, ['owner/app'], now_ns=2_000_000_000_000_000_000))
 
     def test_usage_missing_is_omitted_and_export_ack_does_not_reset_totals(self):
         self.add('agent', 'one', 'success', {'input_tokens': 10, 'output_tokens': 2})
         self.add('agent', 'two', 'success', {'input_tokens': 5})
         self.add('agent', 'missing', 'success', {})
-        text = render_metrics(self.db, ['owner/app'])
+        text = render_metrics(self.db, ['owner/app'], now_ns=2_000_000_000_000_000_000)
         self.assertIn('agentic_tokens_total{repository="owner/app",type="input"} 15\n', text)
         self.assertIn('agentic_tokens_total{repository="owner/app",type="output"} 2\n', text)
         self.assertNotIn('agentic_cost_usd_total', text)
         self.store.acknowledge('agent', 'one')
-        self.assertEqual(text, render_metrics(self.db, ['owner/app']))
+        self.assertEqual(text, render_metrics(self.db, ['owner/app'], now_ns=2_000_000_000_000_000_000))
         self.assertNotIn('agentic_tokens_total{', render_metrics(self.db, ['owner/other']))
 
     def test_limit_and_conflicting_terminal_attempt_fail_closed(self):
