@@ -1,0 +1,168 @@
+name: Reusable security checks
+on:
+  workflow_call:
+    inputs:
+      verify-fixtures:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  scanners:
+    name: Secrets, dependencies and IaC
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install verified scanner releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tools="$RUNNER_TEMP/security-tools"
+          mkdir -p "$tools"
+          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern gitleaks_8.30.1_linux_x64.tar.gz --pattern gitleaks_8.30.1_checksums.txt --dir "$tools"
+          gh release download v0.76.1 --repo aquasecurity/trivy --pattern trivy_0.76.1_Linux-64bit.tar.gz --pattern trivy_0.76.1_checksums.txt --dir "$tools"
+          cd "$tools"
+          sha256sum --check --ignore-missing gitleaks_8.30.1_checksums.txt
+          sha256sum --check --ignore-missing trivy_0.76.1_checksums.txt
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          tar -xzf trivy_0.76.1_Linux-64bit.tar.gz trivy
+          echo "$tools" >> "$GITHUB_PATH"
+      - name: Prepare report sanitizer
+        run: |
+          cat > "$RUNNER_TEMP/sanitize_security_reports.py" <<'PYCODE'
+          from pathlib import Path
+          import json, sys
+          source, destination = map(Path, sys.argv[1:3])
+          destination.mkdir(parents=True, exist_ok=True)
+          raw = source / 'gitleaks-raw.json'
+          if raw.exists():
+              fields = ('RuleID', 'File', 'StartLine', 'EndLine', 'Commit')
+              safe = [{key: item[key] for key in fields if key in item} for item in json.loads(raw.read_text())]
+              (destination / 'gitleaks.json').write_text(json.dumps(safe, indent=2))
+          raw = source / 'trivy-raw.json'
+          if raw.exists():
+              safe = []
+              for result in json.loads(raw.read_text()).get('Results', []):
+                  vulns = [{key: item[key] for key in ('VulnerabilityID', 'PkgName', 'InstalledVersion', 'FixedVersion', 'Severity') if key in item} for item in result.get('Vulnerabilities', [])]
+                  configs = [{key: item[key] for key in ('ID', 'AVDID', 'Severity', 'Status') if key in item} for item in result.get('Misconfigurations', [])]
+                  safe.append({'Target': result.get('Target'), 'Type': result.get('Type'), 'Vulnerabilities': vulns, 'Misconfigurations': configs})
+              (destination / 'trivy.json').write_text(json.dumps(safe, indent=2))
+          PYCODE
+      - name: Scan Git history for secrets
+        run: gitleaks git . --log-opts=--all --redact --report-format json --report-path "$RUNNER_TEMP/gitleaks-raw.json" --no-banner
+      - name: Scan dependencies and infrastructure
+        run: trivy fs --scanners vuln,misconfig --include-dev-deps --severity HIGH,CRITICAL --exit-code 1 --format json --output "$RUNNER_TEMP/trivy-raw.json" --skip-dirs .git --skip-dirs node_modules .
+      - name: Sanitize reports for publication
+        if: ${{ !cancelled() }}
+        run: python3 "$RUNNER_TEMP/sanitize_security_reports.py" "$RUNNER_TEMP" security-reports
+      - name: Verify scanner detection
+        if: inputs.verify-fixtures
+        run: python3 scripts/test_security_scanners.py "$RUNNER_TEMP/sanitize_security_reports.py"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: security-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            security-reports/gitleaks.json
+            security-reports/trivy.json
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: false
+  languages:
+    name: Detect CodeQL languages
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - id: detect
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, pathlib, subprocess
+          names = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          suffixes = {pathlib.Path(name).suffix.lower() for name in names if name}
+          languages = []
+          if suffixes & {'.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts'}:
+              languages.append('javascript-typescript')
+          if '.py' in suffixes:
+              languages.append('python')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(languages) + '\n')
+          PYCODE
+  codeql:
+    name: CodeQL
+    needs: languages
+    if: needs.languages.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.languages.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@793b778da9c9275a0f276522b27cb5fc14bba279
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@793b778da9c9275a0f276522b27cb5fc14bba279
+        with:
+          output: codeql-results
+          category: /language:${{ matrix.language }}
+      - name: Reject high severity code findings
+        run: |
+          python3 - <<'PYCODE'
+          import json, pathlib, sys
+          paths = list(pathlib.Path('codeql-results').glob('*.sarif'))
+          if not paths:
+              sys.exit('CodeQL produced no SARIF results')
+          findings = []
+          for path in paths:
+              for run in json.loads(path.read_text()).get('runs', []):
+                  rules = {rule['id']: rule for rule in run['tool']['driver'].get('rules', [])}
+                  for result in run.get('results', []):
+                      if result.get('ruleId') not in rules:
+                          sys.exit('CodeQL result is missing rule metadata')
+                      rule = rules[result['ruleId']]
+                      severity = float(rule.get('properties', {}).get('security-severity', 0))
+                      if severity >= 7:
+                          findings.append(result.get('ruleId', 'unknown-rule'))
+          if findings:
+              sys.exit('High severity CodeQL findings: ' + ', '.join(sorted(set(findings))))
+          PYCODE
+  security:
+    name: Security
+    if: always()
+    needs: [scanners, languages, codeql]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      SCANNERS: ${{ needs.scanners.result }}
+      LANGUAGES: ${{ needs.languages.result }}
+      MATRIX: ${{ needs.languages.outputs.matrix }}
+      CODEQL: ${{ needs.codeql.result }}
+    steps:
+      - run: |
+          test "$SCANNERS" = success
+          test "$LANGUAGES" = success
+          if [ "$MATRIX" = '[]' ]; then
+            test "$CODEQL" = skipped
+          else
+            test "$CODEQL" = success
+          fi

@@ -2,6 +2,8 @@ name: Platform CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "47 6 * * 1"
 permissions:
   contents: read
 concurrency:
@@ -9,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   validate:
-    name: CI
+    name: Workflow validation
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -17,3 +19,22 @@ jobs:
         with:
           persist-credentials: false
       - run: ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.yml").each { |path| YAML.load_file(path) }'
+      - run: python3 scripts/test_security_policy.py
+  security:
+    uses: ./.github/workflows/security-checks.yml
+    permissions:
+      contents: read
+      security-events: write
+  ci:
+    name: CI
+    if: always()
+    needs: [validate, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      VALIDATION: ${{ needs.validate.result }}
+      SECURITY: ${{ needs.security.result }}
+    steps:
+      - run: |
+          test "$VALIDATION" = success
+          test "$SECURITY" = success
