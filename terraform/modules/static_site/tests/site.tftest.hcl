@@ -14,7 +14,7 @@ variables {
 run "private_static_origin" {
   command = apply
   assert {
-    condition     = aws_cloudfront_distribution.site.web_acl_id == var.web_acl_arn && aws_s3_bucket_server_side_encryption_configuration.site.rule[0].apply_server_side_encryption_by_default[0].kms_master_key_id == var.content_kms_key_arn
+    condition     = aws_cloudfront_distribution.site.web_acl_id == var.web_acl_arn && one(one(aws_s3_bucket_server_side_encryption_configuration.site.rule).apply_server_side_encryption_by_default).kms_master_key_id == var.content_kms_key_arn
     error_message = "Explicit reviewed WAF and content encryption are required."
   }
   assert {
