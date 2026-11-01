@@ -131,8 +131,8 @@ def diagnostics(container):
     return state
 
 
-def screenshots(url, start, end, panels, output):
-    from playwright.sync_api import sync_playwright
+def screenshots(url, start, end, panels, output, report):
+    from playwright.sync_api import sync_playwright, expect
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(args=['--no-proxy-server'])
         try:
@@ -140,14 +140,39 @@ def screenshots(url, start, end, panels, output):
                                       ('phone', {'width': 390, 'height': 844})]:
                 for repo in ('fixture/alpha', 'fixture/beta'):
                     page = browser.new_page(viewport=viewport)
+                    responses = []
+                    page.on('response', lambda response: responses.append(response)
+                            if '/api/ds/query' in response.url else None)
                     query = urlencode({'from': start * 1000, 'to': end * 1000,
                                        'var-metrics': 'fixture-metrics', 'var-repository': repo})
-                    page.goto(url + '/d/agentic-engineering-draft?' + query, wait_until='networkidle')
-                    for panel in panels:
-                        page.get_by_text(panel['title'], exact=True).first.scroll_into_view_if_needed(timeout=30000)
-                    page.get_by_text(panels[0]['title'], exact=True).first.scroll_into_view_if_needed()
-                    page.screenshot(path=str(output / f'{layout}-{repo.split("/")[1]}.png'), full_page=True)
-                    page.close()
+                    try:
+                        page.goto(url + '/d/agentic-engineering-draft?' + query, wait_until='networkidle')
+                        for panel in panels:
+                            page.get_by_text(panel['title'], exact=True).first.scroll_into_view_if_needed(timeout=30000)
+                        for panel_id in (1, 3, 5):
+                            panel = next(item for item in panels if item['id'] == panel_id)
+                            region = page.locator('[aria-label=' + json.dumps(panel['title'] + ' panel') + ']')
+                            value = EXPECTED[repo][panel_id - 1]
+                            expect(region).to_contain_text(re.compile(r'(?<![0-9])' + str(value) + r'(?:\.0+)?\s*%?(?![0-9])'), timeout=30000)
+                        report.setdefault('render_checks', []).append({'layout': layout, 'repository': repo, 'panels': [1, 3, 5]})
+                    finally:
+                        for response in responses:
+                            try:
+                                payload = response.json()
+                                errors = [item.get('error') for item in payload.get('results', {}).values() if item.get('error')]
+                                if response.status >= 400 or errors:
+                                    body = response.request.post_data_json or {}
+                                    report.setdefault('frontend_errors', []).append({
+                                        'status': response.status, 'message': str(payload.get('message', ''))[:1000],
+                                        'errors': [str(error)[:1000] for error in errors],
+                                        'queries': [{'expr': item.get('expr'), 'uid': item.get('datasource', {}).get('uid')}
+                                                    for item in body.get('queries', [])]})
+                            except Exception:
+                                report.setdefault('frontend_errors', []).append({'status': response.status, 'message': 'Query response unavailable'})
+                        page.get_by_text(panels[0]['title'], exact=True).first.scroll_into_view_if_needed()
+                        page.screenshot(path=str(output / f'{layout}-{repo.split("/")[1]}.png'), full_page=True)
+                        page.close()
+                    assert not report.get('frontend_errors'), report['frontend_errors']
         finally:
             browser.close()
 
@@ -215,7 +240,7 @@ def main(output):
                                            'expected': expected, 'observed': value})
                 assert (value is None if expected is None else
                         value is not None and math.isclose(value, expected, rel_tol=1e-5, abs_tol=1e-5)), report['queries'][-1]
-        screenshots(url, start, end, panels, output)
+        screenshots(url, start, end, panels, output, report)
         report['status'] = 'passed'
     except Exception as error:
         report.update(status='failed', error=str(error))
