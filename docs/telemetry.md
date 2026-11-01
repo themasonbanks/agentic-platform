@@ -31,3 +31,9 @@ Three additional tests cover signed normalization/deduplication, wrong signature
 ## Live PR snapshot verification
 
 Read-only GitHub REST data for merged platform PR #6 was normalized through the existing snake-case updated_at adapter and exported through the SDK to an in-memory receiver. The resulting span was engineering.github.merged with repository/KEB-120/PR6 metadata; no title, body, user or credentials were exported. The adapter already used the correct GitHub field, so no code change was required. This is a reconciliation snapshot test using the actual REST response, not proof of a signed webhook delivery or issue-to-merge lead-time accuracy. The CI and PR source read paths now both have live-snapshot evidence; Linear/Codex live delivery and Grafana acceptance remain missing.
+
+## Authenticated GitHub telemetry intake
+
+`telemetry.github.receive` validates HMAC over the bounded raw body before parsing or resolving issue mappings, then enforces repository-to-installation allowlisting. It accepts only workflow_run/PR events and requires a trusted resolver to establish the issue relationship. PR deduplication uses signed lifecycle metadata rather than an unsigned delivery header or a digest of private body text. No raw payload is persisted. Three additional tests verify signature-before-resolver ordering, installation scope, missing mappings and replay/privacy behavior; all 16 tests pass locally.
+
+The resolver must use verified project/PR/commit relationships, not blindly trust issue-looking strings in titles or body text. GitHub has no signed global delivery timestamp here; durable logical deduplication handles exact lifecycle replays, while reconciliation and bounded storage/retention remain operational requirements. Live signed GitHub delivery and deployed HTTP routing are not established by these synthetic tests.
