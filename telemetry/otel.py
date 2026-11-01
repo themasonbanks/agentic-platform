@@ -1,5 +1,7 @@
 """Send durable metadata events through the OpenTelemetry SDK without raw payloads."""
 from opentelemetry import trace
+import time
+import uuid
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
@@ -15,12 +17,18 @@ class ConfirmingExporter(SpanExporter):
 
 
 def export_pending(store, exporter, limit=100):
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError('Bounded export batch required')
     confirmed = ConfirmingExporter(exporter)
     provider = TracerProvider(resource=Resource({'service.name': 'agentic-platform'}), shutdown_on_exit=False)
     provider.add_span_processor(SimpleSpanProcessor(confirmed))
     tracer = provider.get_tracer('agentic.engineering', '1')
     delivered = 0
-    for event in store.pending(limit):
+    worker = uuid.uuid4().hex
+    for _ in range(limit):
+        event = store.claim_next(worker, time.time_ns())
+        if event is None:
+            break
         parent = trace.SpanContext(
             trace_id=int(event['trace_id'], 16), span_id=int(event['trace_id'][16:], 16) or 1,
             is_remote=True, trace_flags=trace.TraceFlags(trace.TraceFlags.SAMPLED))
@@ -38,7 +46,9 @@ def export_pending(store, exporter, limit=100):
         duration = event['attributes'].get('duration_ms') or 0
         span.end(end_time=event['observed_ns'] + max(duration * 1_000_000, 1))
         if confirmed.result != SpanExportResult.SUCCESS:
+            store.release_claim(event['source'], event['event_id'], worker)
             break
-        store.acknowledge(event['source'], event['event_id'])
+        if not store.acknowledge_claim(event['source'], event['event_id'], worker, time.time_ns()):
+            break
         delivered += 1
     return delivered

@@ -18,6 +18,9 @@ class EventStore:
             source TEXT NOT NULL, event_id TEXT NOT NULL, observed_ns INTEGER NOT NULL,
             trace_id TEXT NOT NULL, span_id TEXT NOT NULL, payload TEXT NOT NULL,
             exported INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(source,event_id))''')
+        db.execute('''CREATE TABLE IF NOT EXISTS engineering_export_claims (
+            source TEXT NOT NULL, event_id TEXT NOT NULL, worker TEXT NOT NULL,
+            expires_ns INTEGER NOT NULL, PRIMARY KEY(source,event_id))''')
         db.commit()
 
     def append(self, source, event_id, repository, issue, kind, observed_ns, attributes):
@@ -69,3 +72,43 @@ class EventStore:
     def acknowledge(self, source, event_id):
         with self.db:
             self.db.execute('UPDATE engineering_events SET exported=1 WHERE source=? AND event_id=?', (source, event_id))
+
+    def claim_next(self, worker, now_ns, lease_ns=300_000_000_000):
+        if (not isinstance(worker, str) or not re.fullmatch('[0-9a-f]{32}', worker)
+                or type(now_ns) is not int or now_ns < 0
+                or type(lease_ns) is not int or not 0 < lease_ns <= 300_000_000_000
+                or now_ns + lease_ns > 9_223_372_036_854_775_807):
+            raise ValueError('Bounded worker lease required')
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            row = self.db.execute('''SELECT e.source,e.event_id,e.trace_id,e.span_id,e.payload
+                FROM engineering_events e LEFT JOIN engineering_export_claims c
+                ON e.source=c.source AND e.event_id=c.event_id
+                WHERE e.exported=0 AND (c.worker IS NULL OR c.expires_ns<=?)
+                ORDER BY e.observed_ns,e.source,e.event_id LIMIT 1''', (now_ns,)).fetchone()
+            if row is None:
+                return None
+            source, identity, trace_id, span_id, payload = row
+            self.db.execute('INSERT OR REPLACE INTO engineering_export_claims VALUES(?,?,?,?)',
+                            (source, identity, worker, now_ns + lease_ns))
+        return dict(json.loads(payload), trace_id=trace_id, span_id=span_id)
+
+    def acknowledge_claim(self, source, event_id, worker, now_ns):
+        if type(now_ns) is not int or not 0 <= now_ns <= 9_223_372_036_854_775_807:
+            raise ValueError('Trusted receiver timestamp required')
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            claim = self.db.execute('SELECT worker,expires_ns FROM engineering_export_claims '
+                                    'WHERE source=? AND event_id=?', (source, event_id)).fetchone()
+            if claim is None or claim[0] != worker or claim[1] <= now_ns:
+                return False
+            self.db.execute('UPDATE engineering_events SET exported=1 WHERE source=? AND event_id=?',
+                            (source, event_id))
+            self.db.execute('DELETE FROM engineering_export_claims WHERE source=? AND event_id=?',
+                            (source, event_id))
+        return True
+
+    def release_claim(self, source, event_id, worker):
+        with self.db:
+            self.db.execute('DELETE FROM engineering_export_claims WHERE source=? AND event_id=? AND worker=?',
+                            (source, event_id, worker))
