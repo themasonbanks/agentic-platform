@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import json
 import time
 import uuid
+from remediation.process import ProcessStopped
 
 
 class Supervisor:
@@ -56,16 +57,34 @@ class Supervisor:
         row = self.db.execute('''SELECT r.request,r.status,a.status,a.mode,b.status
             FROM execution_runs r JOIN attempts a ON a.id=r.attempt
             JOIN spend_reservations b ON b.run=r.run WHERE r.run=?''', (run,)).fetchone()
-        return (row is not None and row[1] in {'preparing', 'reserved'} and row[2] == 'running'
+        return (row is not None and row[1] in {'preparing', 'reserved', 'running'} and row[2] == 'running'
                 and row[3] == 'execution' and row[4] == 'reserved'
                 and self._now() < json.loads(row[0])['deadline']
                 and self.enablement.enabled(self.configuration))
+
+    def execute(self, run, worker):
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            row = self.db.execute('SELECT request,status FROM execution_runs WHERE run=?', (run,)).fetchone()
+            if row is None or row[1] != 'reserved' or not self.can_continue(run):
+                raise ValueError('Fresh reserved execution required')
+            self.db.execute("UPDATE execution_runs SET status='running' WHERE run=?", (run,))
+        request = json.loads(row[0])
+        try:
+            return worker.run(request, request['deadline'] - self.clock(), lambda: self.can_continue(run))
+        except ProcessStopped:
+            with self.db:
+                self.db.execute('''UPDATE execution_runs SET status='needs_human',reason='worker_stopped_cost_unknown'
+                    WHERE run=?''', (run,))
+                self.db.execute('''UPDATE jobs SET status='needs_human',reason='worker_stopped_cost_unknown'
+                    WHERE id=(SELECT job FROM attempts WHERE id=?)''', (request['attempt'],))
+            raise
 
     def finish(self, run, successful, actual_microusd=None):
         if type(successful) is not bool:
             raise ValueError('Explicit execution outcome required')
         row = self.db.execute('SELECT request,status FROM execution_runs WHERE run=?', (run,)).fetchone()
-        if row is None or row[1] != 'reserved':
+        if row is None or row[1] not in {'reserved', 'running'}:
             raise ValueError('Unknown or already reconciled execution')
         request = json.loads(row[0])
         reason = 'execution_complete'

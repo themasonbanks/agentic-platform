@@ -8,11 +8,13 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+import sys
 
 from remediation.budget import Budget
 from remediation.enablement import Enablement
 from remediation.intake import Intake, Review
 from remediation.supervisor import Supervisor
+from remediation.process import ProcessStopped, ProcessWorker
 
 
 CONFIGURATION = {'app': 'fixture-app-v1', 'endpoint': 'fixture-endpoint-v1',
@@ -157,6 +159,33 @@ class SupervisorTests(unittest.TestCase):
             db.commit()
             Intake(db, self.secret, {'owner/app': 42}, 123, self.source)
             self.assertEqual(db.execute('SELECT mode FROM attempts').fetchone()[0], 'dry_run')
+
+    def test_real_process_handoff_preserves_lease_until_reconciliation(self):
+        self.enable()
+        request = self.supervisor.prepare(self.queue())
+        worker = ProcessWorker((str(Path(sys.executable).resolve()), '-c',
+                                'import json,sys;print(json.load(sys.stdin)["run"])'), self.temporary.name)
+        result = self.supervisor.execute(request['run'], worker)
+        self.assertEqual(result.output.strip().decode(), request['run'])
+        self.assertTrue(self.supervisor.can_continue(request['run']))
+        with sqlite3.connect(self.path) as db:
+            other = Supervisor(Intake(db, self.secret, {'owner/app': 42}, 123, self.source),
+                               Budget(db), Enablement(db, 7), CONFIGURATION, 30, clock=lambda: self.now)
+            with self.assertRaises(ValueError):
+                other.execute(request['run'], worker)
+        self.assertEqual(self.supervisor.finish(request['run'], True, 0), 'execution_complete')
+
+    def test_process_failure_releases_no_reserved_money(self):
+        self.enable()
+        request = self.supervisor.prepare(self.queue())
+        worker = ProcessWorker((str(Path(sys.executable).resolve()), '-c', 'raise SystemExit(2)'), self.temporary.name)
+        with self.assertRaises(ProcessStopped):
+            self.supervisor.execute(request['run'], worker)
+        self.assertFalse(self.supervisor.can_continue(request['run']))
+        self.assertEqual(self.db.execute('SELECT status FROM jobs').fetchone()[0], 'needs_human')
+        self.assertEqual(self.db.execute('SELECT reserved,status FROM spend_reservations').fetchone(), (30, 'reserved'))
+        self.assertEqual(self.db.execute('SELECT status FROM attempts').fetchone()[0], 'running')
+        self.assertIsNone(self.supervisor.prepare(self.queue(11)))
 
 
 if __name__ == '__main__':
