@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from urllib.request import build_opener, ProxyHandler
 import uuid
 from test_alert_rules import fixture_files
+from dashboard_producer_fixture import produce
 
 ROOT = Path(__file__).resolve().parents[1]
 GRAFANA = 'grafana/grafana@sha256:6e5d306338670f381a942f1c50d3c266bf71531e5ddd9ee4fc1a133dac5ce63d'
@@ -42,23 +43,14 @@ def generate(directory):
         series.append((name, dict(repository=repo, **labels), rate, 1000))
     def gauge(name, repo, value):
         series.append((name, {'repository': repo}, 0, value))
-    for repo, success, first, inputs, outputs, pending, lag in (
-            ('fixture/alpha', 8, 6, 10, 2, 17, 5), ('fixture/beta', 3, 9, 4, 1, 49, 9)):
-        counter('agentic_metric_source_events_total', repo, 10, source='ci')
-        for name, wins, labels in (('agentic_runs_total', success, {}),
-                                   ('agentic_ci_attempts_total', first, {'attempt': '1'})):
+    for repo, success, pending in (('fixture/alpha', 8, 17), ('fixture/beta', 3, 49)):
+        for name, wins, labels in (('agentic_runs_total', success, {}),):
             counter(name, repo, wins, outcome='success', **labels)
             counter(name, repo, 10 - wins, outcome='failure', **labels)
-        counter('agentic_ci_attempts_total', repo, 30, attempt='retry', outcome='success')
-        counter('agentic_review_cycles_total', repo, 2 if repo.endswith('alpha') else 1)
-        counter('agentic_tokens_total', repo, inputs, type='input')
-        counter('agentic_tokens_total', repo, outputs, type='output')
         counter('agentic_cost_unknown_runs_total', repo, 1 if repo.endswith('alpha') else 2)
         counter('agentic_human_interventions_total', repo, 1 if repo.endswith('alpha') else 0)
         counter('agentic_deployments_total', repo, 1 if repo.endswith('alpha') else 0, outcome='failure')
         gauge('agentic_remediation_pending_age_seconds', repo, pending)
-        gauge('agentic_source_lag_seconds', repo, lag)
-        gauge('agentic_source_timing_valid', repo, 1)
         rates = [1, 2, 4, 4, 4] if repo.endswith('alpha') else [0, 0, 2, 4, 4]
         for bound, rate in zip(('60', '300', '600', '3600', '+Inf'), rates):
             counter('agentic_issue_to_merge_seconds_bucket', repo, rate, le=bound)
@@ -71,6 +63,9 @@ def generate(directory):
         label_text = ','.join(key + '=' + json.dumps(value) for key, value in sorted(labels.items()))
         for index in range(61):
             lines.append(f'{name}{{{label_text}}} {base + rate * index:.10g} {start + 60 * index}.0')
+    projected, producer_report = produce(directory, start, end)
+    lines.extend(projected)
+    (directory / 'producer-report.json').write_text(json.dumps(producer_report))
     (directory / 'metrics.om').write_text('\n'.join(lines) + '\n# EOF\n')
     (directory / 'prometheus.yml').write_text('global:\n  scrape_interval: 1m\nscrape_configs: []\n')
     provisioning = directory / 'provisioning'
@@ -151,12 +146,12 @@ def screenshots(url, start, end, panels, output, report):
                         page.goto(url + '/d/agentic-engineering-draft?' + query, wait_until='networkidle')
                         for panel in panels:
                             page.get_by_text(panel['title'], exact=True).first.scroll_into_view_if_needed(timeout=30000)
-                        for panel_id in (1, 3, 5):
+                        for panel_id in (1, 2, 3, 5, 6, 15):
                             panel = next(item for item in panels if item['id'] == panel_id)
                             region = page.get_by_role('region', name=panel['title'], exact=True)
                             value = EXPECTED[repo][panel_id - 1]
                             expect(region).to_contain_text(re.compile(r'(?<![0-9])' + str(value) + r'(?:\.0+)?\s*%?(?![0-9])'), timeout=30000)
-                        report.setdefault('render_checks', []).append({'layout': layout, 'repository': repo, 'panels': [1, 3, 5]})
+                        report.setdefault('render_checks', []).append({'layout': layout, 'repository': repo, 'panels': [1, 2, 3, 5, 6, 15]})
                     finally:
                         for response in responses:
                             try:
@@ -188,6 +183,7 @@ def main(output):
     try:
         directory = Path(temporary.name)
         start, end = generate(directory)
+        report['producer'] = json.loads((directory / 'producer-report.json').read_text())
         alert_cases = fixture_files(directory)
         report.update(start=start, end=end)
         for image in (PROMETHEUS, GRAFANA):
