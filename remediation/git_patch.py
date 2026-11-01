@@ -21,11 +21,12 @@ def inspect_patch(repository, expected_head, patch, allowed_roots):
             'GIT_INDEX_FILE': str(Path(temporary) / 'index'),
             'GIT_TERMINAL_PROMPT': '0',
             'GIT_NO_REPLACE_OBJECTS': '1',
+            'GIT_NO_LAZY_FETCH': '1',
         }
 
         def git(*arguments, data=None):
             result = subprocess.run(
-                ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
+                ['git', '-c', 'protocol.allow=never', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
                  '-c', 'core.attributesFile=/dev/null', '-C', str(repository), *arguments],
                 input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 env=environment, timeout=15, check=False,
