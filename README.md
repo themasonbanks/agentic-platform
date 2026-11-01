@@ -1,6 +1,6 @@
 # Agentic platform
 
-Shared automation for independently managed application repositories. Published private KEB-118 scaffold.
+Shared automation for independently managed application repositories. Published public scaffold.
 
 ## Available interface
 
@@ -16,3 +16,7 @@ Mason approved creation of both private repositories. Shared workflow access is 
 - docs: boundaries, adoption and audit findings.
 
 No cloud resources, remediation service or telemetry are provisioned by this scaffold.
+
+## Reusable security workflow
+
+.github/workflows/security-checks.yml adds full-history redacted Gitleaks, high/critical Trivy dependency/IaC checks and supported-language CodeQL analysis with a severity gate. Callers grant contents read and security-events write; only the CodeQL job uses the write scope. The workflow declares no inherited secrets. Pin a reviewed commit and include its result in required CI. Optional verify-fixtures runs the template detection tests; leave false in consumers without that test script.
