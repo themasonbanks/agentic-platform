@@ -20,6 +20,7 @@ jobs:
           persist-credentials: false
       - run: ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.yml").each { |path| YAML.load_file(path) }'
       - run: python3 scripts/test_security_policy.py
+      - run: python3 -m unittest discover -s tests -v
   security:
     uses: ./.github/workflows/security-checks.yml
     permissions:
