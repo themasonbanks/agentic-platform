@@ -1,0 +1,13 @@
+# Engineering dashboards (draft)
+
+engineering-dashboard.json is a Classic Grafana dashboard proposal (schemaVersion42), with a selectable Prometheus datasource and repository filter. Fifteen panels cover run/CI success, review cycles, lead time, tokens, recorded costs and unknowns, intervention, defects, spending, remediation/deployment failures and source lag. Null/NaN values display Unknown; queries do not turn absent data into zero. USD charges are kept in billing currency, not silently converted into the £5–£10 development target.
+
+metric-contract.json defines each query, unit and denominator. These are proposed metric contracts, not currently emitted metrics. KEB-130 currently exports spans, so a reviewed aggregation/metrics producer is still required. A valid JSON file does not prove query execution, correct rendering or seeded totals. Do not import this over an existing dashboard or point it at production before review.
+
+Per-issue/model drill-down and cost attribution must use verified trace/run records and avoid unbounded metric labels. Include model filters/breakdowns and issue links once that data pipeline is validated; these drill-downs are not implemented by the fifteen overview panels. Never infer a confirmed defect from every Sentry exception or an actual cost from token counts without reconciled prices. Missing price/usage/billing sources remain Unknown. Provider invoices and ingestion lag can revise spending totals.
+
+Required alert design: stale remediation beyond its approved deadline, CI failure spikes with explicit sample denominator, runaway token/cost usage against owner-approved ceilings, and deployment failures. Thresholds and contact destinations are owner inputs, not inferred from the AWS budget. Configure no-data/error handling as a separate telemetry-health signal so an ingestion outage cannot appear healthy or masquerade as a confirmed deployment failure. Alert routing and test notification remain pending Grafana setup and Mason's chosen channel.
+
+Before KEB-131 is Done: implement the approved metric producer and alert rules, import into a disposable Grafana instance, seed known multi-project/source events and verify totals/filtering/unknowns, inspect desktop/phone layouts, test missing-data/clock/out-of-order behavior, and deliver a test alert to the approved destination. Then repeat against Mason's Cloud stack with restricted credentials and retention limits. No Grafana resources or alerts have been created by this draft.
+
+Reference: https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/view-dashboard-json-model/ .
