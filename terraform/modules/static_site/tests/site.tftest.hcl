@@ -34,3 +34,18 @@ run "private_static_origin" {
     error_message = "Viewer traffic must use HTTPS."
   }
 }
+
+run "reject_regional_waf" {
+  command = plan
+  variables {
+    web_acl_arn = "arn:aws:wafv2:eu-west-2:123456789012:regional/webacl/fixture/unit"
+  }
+  expect_failures = [var.web_acl_arn]
+}
+run "reject_non_london_key" {
+  command = plan
+  variables {
+    content_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/fixture"
+  }
+  expect_failures = [var.content_kms_key_arn]
+}
