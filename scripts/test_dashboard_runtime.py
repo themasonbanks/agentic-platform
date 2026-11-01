@@ -62,7 +62,8 @@ def generate(directory):
     for name, labels, rate, base in series:
         label_text = ','.join(key + '=' + json.dumps(value) for key, value in sorted(labels.items()))
         for index in range(61):
-            lines.append(f'{name}{{{label_text}}} {base + rate * index:.10g} {start + 60 * index}.0')
+            progress = min(index, 20) * 3 if name in {'agentic_runs_total', 'agentic_issue_to_merge_seconds_bucket'} else index
+            lines.append(f'{name}{{{label_text}}} {base + rate * progress:.10g} {start + 60 * index}.0')
     projected, producer_report = produce(directory, start, end)
     lines.extend(projected)
     (directory / 'producer-report.json').write_text(json.dumps(producer_report))
@@ -242,6 +243,18 @@ def main(output):
                                            'expected': expected, 'observed': value})
                 assert (value is None if expected is None else
                         value is not None and math.isclose(value, expected, rel_tol=1e-5, abs_tol=1e-5)), report['queries'][-1]
+        for repository in ('fixture/alpha', 'fixture/beta'):
+            for panel in (panels[0], panels[3]):
+                expression = panel['targets'][0]['expr'].replace('${repository}', repository).replace('$__range', '5m')
+                query = urlencode({'query': expression, 'time': end})
+                result = get(url + '/api/datasources/proxy/uid/fixture-metrics/api/v1/query?' + query)
+                assert result['status'] == 'success', result
+                values = result['data']['result']
+                assert len(values) <= 1, values
+                value = float(values[0]['value'][1]) if values else None
+                assert value is None or math.isnan(value), (repository, panel['id'], value)
+                report.setdefault('range_checks', []).append({'repository': repository, 'panel': panel['title'],
+                                                              'selected_seconds': 300, 'observed': None})
         screenshots(url, start, end, panels, output, report)
         report['status'] = 'passed'
     except Exception as error:

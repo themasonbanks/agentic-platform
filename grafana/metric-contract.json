@@ -1,9 +1,9 @@
 [
   {
     "panel": "Run success (%)",
-    "query": "100 * sum(rate(agentic_runs_total{repository=~\"${repository}\",outcome=\"success\"}[$__rate_interval])) / sum(rate(agentic_runs_total{repository=~\"${repository}\",outcome=~\"success|failure\"}[$__rate_interval]))",
+    "query": "100 * sum(increase(agentic_runs_total{repository=~\"${repository}\",outcome=\"success\"}[$__range])) / sum(increase(agentic_runs_total{repository=~\"${repository}\",outcome=~\"success|failure\"}[$__range]))",
     "unit": "percent",
-    "definition": "Completed successful runs / completed success-or-failure runs; queued/cancelled runs excluded."
+    "definition": "Completed successful runs / completed success-or-failure runs; queued/cancelled runs excluded. Uses completions within the selected dashboard time range."
   },
   {
     "panel": "CI first-pass success (%)",
@@ -19,9 +19,9 @@
   },
   {
     "panel": "Issue-to-merge p50",
-    "query": "histogram_quantile(0.5,sum by(le)(rate(agentic_issue_to_merge_seconds_bucket{repository=~\"${repository}\"}[$__rate_interval])))",
+    "query": "histogram_quantile(0.5,sum by(le)(increase(agentic_issue_to_merge_seconds_bucket{repository=~\"${repository}\"}[$__range])))",
     "unit": "s",
-    "definition": "Verified issue creation to first associated merged PR; incomplete mappings excluded and reported separately."
+    "definition": "Verified issue creation to first associated merged PR; incomplete mappings excluded and reported separately. Uses completions within the selected dashboard time range."
   },
   {
     "panel": "Input tokens",
