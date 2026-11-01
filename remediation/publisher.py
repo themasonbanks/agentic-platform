@@ -66,8 +66,10 @@ class Publisher:
                 additions.append({'path': file.path,
                                   'contents': base64.b64encode(contents).decode('ascii')})
         latest = self._review(repository, pr, comment, expected_head)
-        if latest.branch != review.branch or latest.path != review.path or latest.line != review.line:
+        if latest != review:
             raise ValueError('Review target changed during preparation')
+        if not self.enablement.enabled(self.configuration):
+            raise PermissionError('Publication enablement was revoked')
         response = self.api('/graphql', {'query': CREATE_COMMIT, 'variables': {'input': {
             'branch': {'repositoryNameWithOwner': repository, 'refName': review.branch},
             'expectedHeadOid': expected_head,

@@ -92,3 +92,31 @@ class PublisherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Remote branch moved'):
             self.publish()
         self.assertEqual(len(self.calls), 1)
+
+    def test_edited_finding_during_preparation_never_mutates(self):
+        self.gate.set_enabled(42, True, self.config)
+        owner = self
+        class Source:
+            calls = 0
+            def current_review(self, *args):
+                self.calls += 1
+                return owner.review if self.calls == 1 else replace(owner.review, body='Changed finding')
+        self.publisher.source = Source()
+        with self.assertRaisesRegex(ValueError, 'target changed'):
+            self.publish()
+        self.assertEqual(self.calls, [])
+
+    def test_revocation_during_final_metadata_fetch_never_mutates(self):
+        self.gate.set_enabled(42, True, self.config)
+        owner = self
+        class Source:
+            calls = 0
+            def current_review(self, *args):
+                self.calls += 1
+                if self.calls == 2:
+                    owner.gate.revoke(42)
+                return owner.review
+        self.publisher.source = Source()
+        with self.assertRaises(PermissionError):
+            self.publish()
+        self.assertEqual(self.calls, [])
