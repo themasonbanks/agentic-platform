@@ -84,9 +84,9 @@
     "definition": "Terminal failed deployments, unique by deployment ID/environment."
   },
   {
-    "panel": "Source lag",
+    "panel": "Source delivery lag",
     "query": "max(agentic_source_lag_seconds{repository=~\"${repository}\"})",
     "unit": "s",
-    "definition": "Receiver/export observation minus source timestamp; clocks and missing deliveries require reconciliation."
+    "definition": "Latest durable receipt minus source timestamp, maximum across observed repository/source measurements. Invalid timing is omitted; inspect agentic_source_timing_valid and agentic_source_receipt_age_seconds separately. A quick last delivery does not prove a quiet source is fresh or complete."
   }
 ]

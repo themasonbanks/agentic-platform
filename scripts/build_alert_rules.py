@@ -11,7 +11,7 @@ KEYS = {'repositories', 'window_seconds', 'hold_seconds', 'pending_seconds',
         'recorded_cost_usd_limit', 'deployment_failure_limit', 'source_lag_seconds'}
 METRICS = ('agentic_remediation_pending_age_seconds', 'agentic_ci_attempts_total',
            'agentic_tokens_total', 'agentic_cost_usd_total',
-           'agentic_deployments_total', 'agentic_source_lag_seconds')
+           'agentic_deployments_total', 'agentic_source_lag_seconds', 'agentic_source_timing_valid')
 
 
 def build(configuration):
@@ -63,6 +63,8 @@ def build(configuration):
             'Terminal deployment failures exceed the configured window count')
         add('AgenticTelemetryLag', 'max(' + metric(METRICS[5]) + ') > ' + str(configuration['source_lag_seconds']),
             'telemetry', 'Reported source lag exceeds the configured limit')
+        add('AgenticTelemetryTimingUnknown', 'min(' + metric(METRICS[6]) + ') < 1',
+            'telemetry', 'Source or receiver timing is invalid or unverified')
         for name in METRICS:
             add('AgenticTelemetryMissing', 'absent(' + metric(name) + ')', 'telemetry',
                 'Required metric is missing; business health and cost coverage are unknown', {'metric': name})

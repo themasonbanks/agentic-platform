@@ -873,8 +873,8 @@
     {
       "id": 15,
       "type": "stat",
-      "title": "Source lag",
-      "description": "Receiver/export observation minus source timestamp; clocks and missing deliveries require reconciliation. Producer contract only; live ingestion must be verified.",
+      "title": "Source delivery lag",
+      "description": "Latest durable receipt minus source timestamp, maximum across observed repository/source measurements. Invalid timing is omitted; inspect agentic_source_timing_valid and agentic_source_receipt_age_seconds separately. A quick last delivery does not prove a quiet source is fresh or complete.",
       "gridPos": {
         "x": 16,
         "y": 20,

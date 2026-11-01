@@ -58,6 +58,7 @@ def generate(directory):
         counter('agentic_deployments_total', repo, 1 if repo.endswith('alpha') else 0, outcome='failure')
         gauge('agentic_remediation_pending_age_seconds', repo, pending)
         gauge('agentic_source_lag_seconds', repo, lag)
+        gauge('agentic_source_timing_valid', repo, 1)
         rates = [1, 2, 4, 4, 4] if repo.endswith('alpha') else [0, 0, 2, 4, 4]
         for bound, rate in zip(('60', '300', '600', '3600', '+Inf'), rates):
             counter('agentic_issue_to_merge_seconds_bucket', repo, rate, le=bound)

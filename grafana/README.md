@@ -27,3 +27,5 @@ Backfill/provisioning references: https://prometheus.io/docs/prometheus/latest/s
 See [alerts.md](alerts.md) for explicit threshold configuration, separate missing-data signals, native promtool fixtures and remaining Cloud routing acceptance. The builder generates data source rules without deploying them; no owner thresholds are guessed.
 
 Review cycles are labelled partial: explicit decisions and authenticated inline-review evidence count, while body-only/rate-limit/ambiguous submissions remain unclassified in agentic_review_unclassified_total. Production provider classification and delivery reconciliation remain required; no complete-coverage claim follows from confirmed counters.
+
+Source delivery lag measures the latest durable receipt minus its source timestamp. It does not grow while a source is quiet: use the separate receipt-age gauge and approved heartbeat policy for freshness. Invalid/legacy timing is exposed by source_timing_valid and a separate timing-health alert; no source clock is assumed correct. The current producer and native rule fixture cover these signals, but Cloud collection and actual clock reconciliation are unverified.

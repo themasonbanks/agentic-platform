@@ -12,7 +12,7 @@ FIXTURE = {'repositories': ['fixture/alpha'], 'window_seconds': 300, 'hold_secon
            'deployment_failure_limit': 2, 'source_lag_seconds': 60}
 ALERTS = ('AgenticRemediationStuck', 'AgenticCIFailureSpike', 'AgenticTokenSpike',
           'AgenticRecordedCostSpike', 'AgenticDeploymentFailures', 'AgenticTelemetryLag',
-          'AgenticTelemetryMissing')
+          'AgenticTelemetryTimingUnknown', 'AgenticTelemetryMissing')
 
 
 def fixture_files(directory):
@@ -27,7 +27,8 @@ def fixture_files(directory):
                   ('agentic_tokens_total', ',type="output"', '0+100x15' if violated else '0+1x15'),
                   ('agentic_cost_usd_total', '', '0+0.5x15' if violated else '0+0x15'),
                   ('agentic_deployments_total', ',outcome="failure"', '0+1x15' if violated else '0+0x15'),
-                  ('agentic_source_lag_seconds', '', '90+0x15' if violated else '5+0x15')]
+                  ('agentic_source_lag_seconds', '', '90+0x15' if violated else '5+0x15'),
+                  ('agentic_source_timing_valid', '', '0+0x15' if violated else '1+0x15')]
         return [{'series': name + '{repository=' + json.dumps(repo) + labels + '}',
                  'values': (overrides or {}).get(name + labels, value)} for name, labels, value in values]
     def case(name, inputs, firing=(), at='7m'):
@@ -48,7 +49,9 @@ def fixture_files(directory):
              case('counter resets retain token spikes', series(overrides={
                  'agentic_tokens_total,type="input"': '0+400x3 0+400x11'}), ('AgenticTokenSpike',)),
              case('remediation recovers after age drops', series(overrides={
-                 'agentic_remediation_pending_age_seconds': '100+0x7 0+0x7'}), at='10m')]
+                 'agentic_remediation_pending_age_seconds': '100+0x7 0+0x7'}), at='10m'),
+             case('unknown clock is a separate telemetry signal', series(overrides={
+                 'agentic_source_timing_valid': '0+0x15'}), ('AgenticTelemetryTimingUnknown',))]
     (directory / 'alert-tests.json').write_text(json.dumps({
         'rule_files': ['/fixture/alert-rules.json'], 'evaluation_interval': '1m', 'tests': tests}))
     return len(tests)
