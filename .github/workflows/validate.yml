@@ -20,6 +20,9 @@ jobs:
           persist-credentials: false
       - run: ruby -e 'require "yaml"; Dir.glob(".github/workflows/*.yml").each { |path| YAML.load_file(path) }'
       - run: python3 scripts/test_security_policy.py
+      - run: python3 -m venv "$RUNNER_TEMP/telemetry-env"
+      - run: '"$RUNNER_TEMP/telemetry-env/bin/python" -m pip install -r telemetry/requirements.txt'
+      - run: '"$RUNNER_TEMP/telemetry-env/bin/python" -m unittest discover -s tests -v'
   terraform:
     name: Terraform offline checks
     runs-on: ubuntu-latest
