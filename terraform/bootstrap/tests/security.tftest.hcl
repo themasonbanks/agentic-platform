@@ -19,6 +19,14 @@ variables {
 run "isolated_state_and_roles" {
   command = apply
   assert {
+    condition     = jsondecode(aws_s3_bucket_policy.state.policy).Statement[1].Condition.Null["s3:x-amz-server-side-encryption"] == "false" && jsondecode(aws_s3_bucket_policy.state.policy).Statement[2].Condition.StringNotEquals["s3:x-amz-server-side-encryption-aws-kms-key-id"] == aws_kms_key.state.arn
+    error_message = "Explicit encryption overrides must be denied without denying omitted headers."
+  }
+  assert {
+    condition     = contains(jsondecode(aws_iam_role_policy.state["development_apply"].policy).Statement[2].Resource, "arn:aws:s3:::agentic-state-unit/stockpot/development/workspaces/*/stockpot/development/terraform.tfstate")
+    error_message = "Named workspace state must stay within the development prefix."
+  }
+  assert {
     condition     = aws_s3_bucket_public_access_block.state.block_public_acls && aws_s3_bucket_public_access_block.state.block_public_policy && aws_s3_bucket_public_access_block.state.ignore_public_acls && aws_s3_bucket_public_access_block.state.restrict_public_buckets
     error_message = "State must block all public access."
   }
@@ -31,11 +39,11 @@ run "isolated_state_and_roles" {
     error_message = "Production trust must name exactly the approved repository/environment."
   }
   assert {
-    condition     = alltrue([for statement in jsondecode(aws_iam_role_policy.state["development_plan"].policy).Statement : !contains(statement.Action, "s3:PutObject") || !endswith(statement.Resource, "/terraform.tfstate") if statement.Effect == "Allow"])
+    condition     = alltrue([for statement in jsondecode(aws_iam_role_policy.state["development_plan"].policy).Statement : !contains(statement.Action, "s3:PutObject") || alltrue([for resource in flatten([statement.Resource]) : !endswith(resource, "/terraform.tfstate")]) if statement.Effect == "Allow"])
     error_message = "Plan role must not overwrite state."
   }
   assert {
-    condition     = alltrue([for statement in jsondecode(aws_iam_role_policy.state["development_apply"].policy).Statement : !strcontains(statement.Resource, "/production/") if statement.Effect == "Allow"])
+    condition     = alltrue([for statement in jsondecode(aws_iam_role_policy.state["development_apply"].policy).Statement : alltrue([for resource in flatten([statement.Resource]) : !strcontains(resource, "/production/")]) if statement.Effect == "Allow"])
     error_message = "Development must not access production state."
   }
   assert {

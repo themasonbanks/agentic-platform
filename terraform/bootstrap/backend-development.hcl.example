@@ -1,6 +1,6 @@
 bucket               = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
-key                  = "stockpot/development/terraform.tfstate"
-workspace_key_prefix = "stockpot/development/workspaces"
+key                  = "REPLACE_WITH_STATE_PREFIX/development/terraform.tfstate"
+workspace_key_prefix = "REPLACE_WITH_STATE_PREFIX/development/workspaces"
 region               = "eu-west-2"
 encrypt              = true
 use_lockfile         = true

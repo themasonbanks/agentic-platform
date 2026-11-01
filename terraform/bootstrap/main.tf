@@ -66,6 +66,20 @@ resource "aws_s3_bucket_policy" "state" {
       Sid       = "DenyInsecureTransport", Effect = "Deny", Principal = "*", Action = "s3:*"
       Resource  = [aws_s3_bucket.state.arn, "${aws_s3_bucket.state.arn}/*"]
       Condition = { Bool = { "aws:SecureTransport" = "false" } }
+      }, {
+      Sid      = "DenyExplicitNonKMS", Effect = "Deny", Principal = "*", Action = "s3:PutObject"
+      Resource = "${aws_s3_bucket.state.arn}/*"
+      Condition = {
+        Null            = { "s3:x-amz-server-side-encryption" = "false" }
+        StringNotEquals = { "s3:x-amz-server-side-encryption" = "aws:kms" }
+      }
+      }, {
+      Sid      = "DenyExplicitOtherKey", Effect = "Deny", Principal = "*", Action = "s3:PutObject"
+      Resource = "${aws_s3_bucket.state.arn}/*"
+      Condition = {
+        Null            = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = "false" }
+        StringNotEquals = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = aws_kms_key.state.arn }
+      }
     }]
   })
 }
@@ -117,12 +131,18 @@ resource "aws_iam_role_policy" "state" {
         Effect = "Allow", Action = ["s3:GetBucketLocation"], Resource = aws_s3_bucket.state.arn
       },
       {
-        Effect   = "Allow", Action = each.value.write ? ["s3:GetObject", "s3:PutObject"] : ["s3:GetObject"]
-        Resource = "${aws_s3_bucket.state.arn}/${var.state_prefix}/${each.value.state}/terraform.tfstate"
+        Effect = "Allow", Action = each.value.write ? ["s3:GetObject", "s3:PutObject"] : ["s3:GetObject"]
+        Resource = [
+          "${aws_s3_bucket.state.arn}/${var.state_prefix}/${each.value.state}/terraform.tfstate",
+          "${aws_s3_bucket.state.arn}/${var.state_prefix}/${each.value.state}/workspaces/*/${var.state_prefix}/${each.value.state}/terraform.tfstate"
+        ]
       },
       {
-        Effect   = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-        Resource = "${aws_s3_bucket.state.arn}/${var.state_prefix}/${each.value.state}/terraform.tfstate.tflock"
+        Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = [
+          "${aws_s3_bucket.state.arn}/${var.state_prefix}/${each.value.state}/terraform.tfstate.tflock",
+          "${aws_s3_bucket.state.arn}/${var.state_prefix}/${each.value.state}/workspaces/*/${var.state_prefix}/${each.value.state}/terraform.tfstate.tflock"
+        ]
       },
       {
         Effect    = "Allow", Action = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
