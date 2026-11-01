@@ -71,11 +71,15 @@ class Intake:
             CREATE TABLE IF NOT EXISTS attempts (
                 id INTEGER PRIMARY KEY, job INTEGER NOT NULL,
                 repository TEXT NOT NULL, pr INTEGER NOT NULL,
-                status TEXT NOT NULL, deadline INTEGER NOT NULL
+                status TEXT NOT NULL, deadline INTEGER NOT NULL,
+                mode TEXT NOT NULL DEFAULT 'dry_run'
             );
             CREATE UNIQUE INDEX IF NOT EXISTS one_running_per_pr
                 ON attempts(repository, pr) WHERE status = 'running';
         """)
+        if 'mode' not in {row[1] for row in db.execute('PRAGMA table_info(attempts)')}:
+            db.execute("ALTER TABLE attempts ADD COLUMN mode TEXT NOT NULL DEFAULT 'dry_run'")
+            db.commit()
 
     def receive(self, event: str, signature: str, body: bytes) -> str:
         if len(body) > 1_048_576:
@@ -118,8 +122,13 @@ class Intake:
 
     def claim_dry_run(self, job: int, now: int, timeout: int = 300) -> dict | None:
         """Reserve one bounded dry run; expired reservations require human recovery."""
-        if not 1 <= timeout <= 300:
-            raise ValueError("Dry-run timeout must be between one and 300 seconds")
+        return self._claim(job, now, timeout, 'dry_run')
+
+    def _claim(self, job, now, timeout, mode):
+        if (type(job) is not int or job <= 0 or type(now) is not int or now < 0
+                or type(timeout) is not int or not 1 <= timeout <= 300
+                or mode not in {'dry_run', 'execution'}):
+            raise ValueError("Positive attempt identity, UTC time and one to 300 seconds required")
         self.db.execute("BEGIN IMMEDIATE")
         try:
             row = self.db.execute(
@@ -153,15 +162,18 @@ class Intake:
                 self.db.rollback()
                 return None
             cursor = self.db.execute(
-                "INSERT INTO attempts(job,repository,pr,status,deadline) VALUES(?,?,?,'running',?)",
-                (job, repository, pr, now + timeout),
+                "INSERT INTO attempts(job,repository,pr,status,deadline,mode) VALUES(?,?,?,'running',?,?)",
+                (job, repository, pr, now + timeout, mode),
             )
             self.db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
             self.db.commit()
-            return {"attempt": cursor.lastrowid, "repository": repository, "pr": pr,
+            request = {"attempt": cursor.lastrowid, "repository": repository, "pr": pr,
                     "branch": review.branch,
                     "head_sha": sha, "comment": comment, "path": path, "line": line,
-                    "deadline": now + timeout, "mode": "dry_run", "spend_limit": 0}
+                    "deadline": now + timeout, "mode": mode}
+            if mode == 'dry_run':
+                request['spend_limit'] = 0
+            return request
         except BaseException:
             self.db.rollback()
             raise
@@ -169,7 +181,7 @@ class Intake:
     def finish_dry_run(self, attempt: int, now: int, successful: bool) -> None:
         with self.db:
             row = self.db.execute(
-                "SELECT job,deadline FROM attempts WHERE id=? AND status='running'", (attempt,)
+                "SELECT job,deadline FROM attempts WHERE id=? AND status='running' AND mode='dry_run'", (attempt,)
             ).fetchone()
             if row is None:
                 raise ValueError("Unknown or finished attempt")
