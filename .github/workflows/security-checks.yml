@@ -94,6 +94,9 @@ jobs:
           languages = []
           if suffixes & {'.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts'}:
               languages.append('javascript-typescript')
+          unsupported = suffixes & {'.go', '.rb', '.java', '.kt', '.kts', '.cs', '.c', '.cc', '.cpp', '.h', '.hpp', '.swift', '.rs'}
+          if unsupported:
+              raise SystemExit('Additional source languages require a CodeQL adapter: ' + ', '.join(sorted(unsupported)))
           if '.py' in suffixes:
               languages.append('python')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
@@ -116,12 +119,12 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@793b778da9c9275a0f276522b27cb5fc14bba279
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370
         with:
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-extended
-      - uses: github/codeql-action/analyze@793b778da9c9275a0f276522b27cb5fc14bba279
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370
         with:
           output: codeql-results
           category: /language:${{ matrix.language }}
@@ -135,11 +138,31 @@ jobs:
           findings = []
           for path in paths:
               for run in json.loads(path.read_text()).get('runs', []):
-                  rules = {rule['id']: rule for rule in run['tool']['driver'].get('rules', [])}
+                  tool = run['tool']
+                  extensions = tool.get('extensions', [])
                   for result in run.get('results', []):
-                      if result.get('ruleId') not in rules:
-                          sys.exit('CodeQL result is missing rule metadata')
-                      rule = rules[result['ruleId']]
+                      reference = result.get('rule', {})
+                      component = reference.get('toolComponent', {})
+                      components = [tool['driver']] + extensions
+                      if component.get('index', -1) >= 0:
+                          components = [extensions[component['index']]]
+                      elif any(key in component for key in ('name', 'guid')):
+                          components = [item for item in components if all(item.get(key) == component[key] for key in ('name', 'guid') if key in component)]
+                      rule_id = reference.get('id', result.get('ruleId'))
+                      index = reference.get('index', result.get('ruleIndex'))
+                      if index is not None and index < 0:
+                          index = None
+                      candidates = []
+                      for item in components:
+                          rules = item.get('rules', [])
+                          if index is not None:
+                              if 0 <= index < len(rules) and (rule_id is None or rules[index].get('id') == rule_id):
+                                  candidates.append(rules[index])
+                          else:
+                              candidates.extend(rule for rule in rules if rule.get('id') == rule_id)
+                      if len(candidates) != 1:
+                          sys.exit('CodeQL result has missing or ambiguous rule metadata')
+                      rule = candidates[0]
                       severity = float(rule.get('properties', {}).get('security-severity', 0))
                       if severity >= 7:
                           findings.append(result.get('ruleId', 'unknown-rule'))
