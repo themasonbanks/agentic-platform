@@ -71,18 +71,8 @@ resource "aws_cloudfront_origin_access_control" "site" {
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
 }
-resource "aws_cloudfront_cache_policy" "site" {
-  name        = "${var.bucket_name}-static"
-  min_ttl     = 0
-  default_ttl = 60
-  max_ttl     = 300
-  parameters_in_cache_key_and_forwarded_to_origin {
-    enable_accept_encoding_gzip   = true
-    enable_accept_encoding_brotli = true
-    cookies_config { cookie_behavior = "none" }
-    headers_config { header_behavior = "none" }
-    query_strings_config { query_string_behavior = "none" }
-  }
+data "aws_cloudfront_cache_policy" "site" {
+  name = "Managed-CachingOptimized"
 }
 resource "aws_cloudfront_distribution" "site" {
   web_acl_id          = var.web_acl_arn
@@ -101,7 +91,7 @@ resource "aws_cloudfront_distribution" "site" {
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     compress               = true
-    cache_policy_id        = aws_cloudfront_cache_policy.site.id
+    cache_policy_id        = data.aws_cloudfront_cache_policy.site.id
   }
   restrictions {
     geo_restriction { restriction_type = "none" }
@@ -133,7 +123,13 @@ resource "aws_s3_bucket_policy" "site" {
     ]
   })
 }
-output "preview_url" { value = "https://${aws_cloudfront_distribution.site.domain_name}" }
+output "preview_url" {
+  value = "https://${aws_cloudfront_distribution.site.domain_name}"
+  precondition {
+    condition     = aws_pricingplanmanager_subscription.site.status == "ACTIVE"
+    error_message = "The FREE subscription must be ACTIVE before publishing a preview."
+  }
+}
 output "bucket_name" { value = aws_s3_bucket.site.id }
 output "distribution_id" { value = aws_cloudfront_distribution.site.id }
 

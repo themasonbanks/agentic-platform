@@ -1,0 +1,23 @@
+# Development hosting root (not provisioned)
+
+This root composes the private static-site module, one dedicated CloudFront-scope WAF and a separate content-encryption KMS key. S3/KMS use eu-west-2; WAF uses the explicitly approved us-east-1 global-service exception. Both providers restrict allowed_account_ids to the reviewed account. No production root, deployment role or application upload is included.
+
+The WAF proposes one IP rate rule blocking above2000 requests over300seconds; this is a reviewable development default, not a proven traffic threshold. Review legitimate shared-IP/browser traffic before applying. Request sampling is disabled to avoid collecting request payloads; aggregate WAF metrics remain enabled. The FREE plan supports IP rate limiting and at most5 rules. It does not support custom cache policies, so the module looks up AWS Managed-CachingOptimized. Deployment must set short/revalidating Cache-Control on HTML and appropriate immutable cache headers only on content-hashed assets; default managed-policy TTLs are not an HTML release strategy. Upload/headers/invalidation and phone acceptance remain unfinished.
+
+The content KMS key has automatic rotation, a30-day deletion window and prevent_destroy. Its account administration statement delegates control through reviewed account IAM permissions. The only CloudFront service permission is kms:Decrypt scoped to this distribution ARN. The key policy is created after the distribution; do not upload until the policy is applied and live OAC decrypt access is verified. State uses its own separately bootstrapped key. This root does not grant an uploader or CI role permissions.
+
+## Before a real plan
+
+Complete account MFA/admin/budget setup and remote-state bootstrap first. Use a temporary owner session and verify the account ID. Copy backend.tf.example to ignored backend.tf and backend.hcl.example to ignored backend.hcl, replace bucket/prefix/state-key ARN from approved bootstrap outputs, then initialize with terraform init -backend-config=backend.hcl. Use the state prefix's development key and workspace prefix; do not share this state with another root or use production state. Never commit state, plans, credential values or backend settings.
+
+Copy terraform.tfvars.example to ignored terraform.tfvars and supply reviewed account/bucket values. The eligibility and global-region flags default false; set them true only after the owner confirms account plan/usage quotas, FREE feature compatibility and the global WAF exception. Free Tier account plans are ineligible for the FREE subscription until upgraded; no upgrade is authorized here. No paid-tier fallback is implemented. A future least-privilege plan role must separately receive reviewed read permissions for application resources; the state-only roles are insufficient for this root.
+
+Produce a saved real plan and review resources, exact IAM/KMS policies, regional exception, partial-provisioning costs and the complete GBP estimate with the owner before apply. The subscription is created after distribution/WAF, so these resources may briefly incur pay-as-you-go charges before activation or after failure. No upload/public preview until pricing_plan_status is ACTIVE and live private-origin checks pass. The module's preview_url output rejects inactive subscriptions. Inspect failed partial resources and costs manually; do not auto-upgrade, cancel the subscription or destroy recovery history. FREE cancellation is immediate and returns surviving services to pay-as-you-go pricing.
+
+## Offline evidence and remaining acceptance
+
+CI runs init -backend=false -lockfile=readonly, fmt, validate and mocked tests for both this root and the static-site module. Mock providers never call AWS; mocked command=apply is not provisioning. Root tests verify rate protection, sampled-payload exclusion, key rotation/recovery and exact distribution decrypt trust plus rejection of an unapproved global region. Module tests verify origin controls, FREE-only association, managed cache policy and eligibility/activation guards.
+
+Secure live authentication, real plan review/apply, subscription eligibility/activation, IAM/OAC/TLS tests, protected deployment identities, native/browser preview, Sentry binding, preview cleanup, production promotion and cost telemetry remain required. Nothing in these mocks proves a reachable deployment or that the entire platform fits £5–£10/month.
+
+References: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/flat-rate-pricing-plan.html and https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html .

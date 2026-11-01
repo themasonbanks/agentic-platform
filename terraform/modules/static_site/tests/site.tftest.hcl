@@ -1,4 +1,10 @@
 mock_provider "aws" {
+  mock_resource "aws_pricingplanmanager_subscription" {
+    defaults = { status = "ACTIVE" }
+  }
+  mock_data "aws_cloudfront_cache_policy" {
+    defaults = { id = "658327ea-f89d-4fab-a63d-7e88639e58f6" }
+  }
   mock_resource "aws_s3_bucket" {
     defaults = { id = "site-fixture", arn = "arn:aws:s3:::site-fixture", bucket_regional_domain_name = "site-fixture.s3.eu-west-2.amazonaws.com" }
   }
@@ -19,7 +25,7 @@ run "private_static_origin" {
     error_message = "Only the FREE subscription for this distribution and WAF is allowed."
   }
   assert {
-    condition     = aws_cloudfront_distribution.site.default_cache_behavior[0].cache_policy_id == aws_cloudfront_cache_policy.site.id && length(aws_cloudfront_distribution.site.default_cache_behavior[0].forwarded_values) == 0
+    condition     = aws_cloudfront_distribution.site.default_cache_behavior[0].cache_policy_id == data.aws_cloudfront_cache_policy.site.id && data.aws_cloudfront_cache_policy.site.name == "Managed-CachingOptimized" && length(aws_cloudfront_distribution.site.default_cache_behavior[0].forwarded_values) == 0
     error_message = "Use a plan-compatible cache policy rather than legacy forwarded values."
   }
   assert {
@@ -50,6 +56,15 @@ run "reject_unverified_plan_eligibility" {
     free_plan_eligibility_confirmed = false
   }
   expect_failures = [var.free_plan_eligibility_confirmed]
+}
+run "reject_inactive_subscription_preview" {
+  command   = apply
+  state_key = "inactive-subscription"
+  override_resource {
+    target = aws_pricingplanmanager_subscription.site
+    values = { status = "FAILED" }
+  }
+  expect_failures = [output.preview_url]
 }
 
 run "reject_regional_waf" {
