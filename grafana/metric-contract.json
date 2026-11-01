@@ -12,10 +12,10 @@
     "definition": "First completed attempt per workflow run; skipped/neutral/cancelled excluded, missing denominator unknown."
   },
   {
-    "panel": "Review cycles",
+    "panel": "Review cycles (partial)",
     "query": "sum(increase(agentic_review_cycles_total{repository=~\"${repository}\"}[$__range]))",
     "unit": "short",
-    "definition": "Completed substantive review submissions; rate-limit notices and chat commands excluded."
+    "definition": "Observed confirmed review submissions: approvals, change requests, or authenticated linked inline comments. Body-only and ambiguous submissions remain unclassified; consult agentic_review_unclassified_total. Delivery completeness and historical reconciliation remain unverified."
   },
   {
     "panel": "Issue-to-merge p50",

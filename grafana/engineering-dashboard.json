@@ -141,8 +141,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Review cycles",
-      "description": "Completed substantive review submissions; rate-limit notices and chat commands excluded. Producer contract only; live ingestion must be verified.",
+      "title": "Review cycles (partial)",
+      "description": "Observed confirmed review submissions: approvals, change requests, or authenticated linked inline comments. Body-only and ambiguous submissions remain unclassified; consult agentic_review_unclassified_total. Delivery completeness and historical reconciliation remain unverified.",
       "gridPos": {
         "x": 16,
         "y": 0,
