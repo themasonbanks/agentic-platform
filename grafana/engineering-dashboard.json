@@ -629,7 +629,7 @@
     {
       "id": 11,
       "type": "stat",
-      "title": "Reported AWS month-to-date cost (partial)",
+      "title": "AWS spend (partial)",
       "description": "Billing-source actual month-to-date value; delayed and potentially incomplete until invoice reconciliation. Producer contract only; live ingestion must be verified. Cross-repository aggregates include reported sources only and remain partial when another source is missing.",
       "gridPos": {
         "x": 8,
@@ -690,7 +690,7 @@
     {
       "id": 12,
       "type": "stat",
-      "title": "Reported telemetry month-to-date cost (partial)",
+      "title": "Telemetry spend (partial)",
       "description": "Provider-reported usage charges, not an estimate from span counts. Producer contract only; live ingestion must be verified. Cross-repository aggregates include reported sources only and remain partial when another source is missing.",
       "gridPos": {
         "x": 16,
