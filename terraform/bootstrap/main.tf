@@ -80,6 +80,13 @@ resource "aws_s3_bucket_policy" "state" {
         Null            = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = "false" }
         StringNotEquals = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = aws_kms_key.state.arn }
       }
+      }, {
+      Sid      = "DenyExplicitKMSWithoutKey", Effect = "Deny", Principal = "*", Action = "s3:PutObject"
+      Resource = "${aws_s3_bucket.state.arn}/*"
+      Condition = {
+        StringEquals = { "s3:x-amz-server-side-encryption" = "aws:kms" }
+        Null         = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = "true" }
+      }
     }]
   })
 }

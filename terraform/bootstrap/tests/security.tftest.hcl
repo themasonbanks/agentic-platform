@@ -19,6 +19,10 @@ variables {
 run "isolated_state_and_roles" {
   command = apply
   assert {
+    condition     = jsondecode(aws_s3_bucket_policy.state.policy).Statement[3].Condition.StringEquals["s3:x-amz-server-side-encryption"] == "aws:kms" && jsondecode(aws_s3_bucket_policy.state.policy).Statement[3].Condition.Null["s3:x-amz-server-side-encryption-aws-kms-key-id"] == "true"
+    error_message = "An explicit KMS request without the reviewed key must be denied."
+  }
+  assert {
     condition     = jsondecode(aws_s3_bucket_policy.state.policy).Statement[1].Condition.Null["s3:x-amz-server-side-encryption"] == "false" && jsondecode(aws_s3_bucket_policy.state.policy).Statement[2].Condition.StringNotEquals["s3:x-amz-server-side-encryption-aws-kms-key-id"] == aws_kms_key.state.arn
     error_message = "Explicit encryption overrides must be denied without denying omitted headers."
   }
