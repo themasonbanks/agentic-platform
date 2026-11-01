@@ -4,6 +4,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -117,6 +118,18 @@ def ready(url):
     raise RuntimeError('Fixture service did not become ready')
 
 
+def diagnostics(container):
+    template = '{"status":{{json .State.Status}},"exit_code":{{.State.ExitCode}},"oom":{{.State.OOMKilled}},"ports":{{json .NetworkSettings.Ports}},"requested_ports":{{json .HostConfig.PortBindings}}}'
+    state = json.loads(docker('inspect', '--format', template, container))
+    logs = subprocess.run(['docker', 'logs', '--tail', '80', container], capture_output=True,
+                          text=True, timeout=10, check=False)
+    lines = (logs.stdout + logs.stderr).splitlines()
+    state['startup_errors'] = [line[:1000] for line in lines
+                               if re.search(r'error|fatal|permission|read-only|failed|not writable|not readable|denied', line, re.I)
+                               and not re.search(r'password|token|secret', line, re.I)][-12:]
+    return state
+
+
 def screenshots(url, start, end, panels, output):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as playwright:
@@ -202,6 +215,12 @@ def main(output):
         report['status'] = 'passed'
     except Exception as error:
         report.update(status='failed', error=str(error))
+        report['containers'] = {}
+        for container in containers:
+            try:
+                report['containers'][container] = diagnostics(container)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                report['containers'][container] = {'status': 'diagnostics unavailable'}
         raise
     finally:
         for container in reversed(containers):
