@@ -1,5 +1,6 @@
 """Exercise dashboard queries and layouts against disposable synthetic services."""
 import argparse
+import ipaddress
 import json
 import math
 import os
@@ -10,7 +11,7 @@ import subprocess
 import tempfile
 import time
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import build_opener, ProxyHandler
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,7 +101,7 @@ providers:
 
 
 def get(url, decode=True):
-    with urlopen(url, timeout=10) as response:
+    with build_opener(ProxyHandler({})).open(url, timeout=10) as response:
         body = response.read(2_097_153)
     if len(body) > 2_097_152:
         raise ValueError('Fixture response exceeded bound')
@@ -133,7 +134,7 @@ def diagnostics(container):
 def screenshots(url, start, end, panels, output):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = playwright.chromium.launch(args=['--no-proxy-server'])
         try:
             for layout, viewport in [('desktop', {'width': 1440, 'height': 1400}),
                                       ('phone', {'width': 390, 'height': 844})]:
@@ -182,14 +183,17 @@ def main(output):
         containers.append(grafana_name)
         docker('run', '-d', '--name', grafana_name, '--network', prefix, *common, '--memory', '1g',
                '--tmpfs', f'/var/lib/grafana:uid={os.getuid()},gid={os.getgid()}',
-               '-p', '127.0.0.1::3000', *mount,
+               *mount,
                '-e', 'GF_PATHS_PROVISIONING=/fixture/provisioning',
                '-e', 'GF_AUTH_ANONYMOUS_ENABLED=true', '-e', 'GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer',
                '-e', 'GF_SECURITY_ADMIN_PASSWORD=' + uuid.uuid4().hex,
                '-e', 'GF_ANALYTICS_REPORTING_ENABLED=false', '-e', 'GF_ANALYTICS_CHECK_FOR_UPDATES=false',
                '-e', 'GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false', '-e', 'GF_PLUGINS_PREINSTALL_DISABLED=true', GRAFANA)
-        port = docker('port', grafana_name, '3000/tcp').rsplit(':', 1)[1]
-        url = 'http://127.0.0.1:' + port
+        networks = json.loads(docker('inspect', '--format', '{{json .NetworkSettings.Networks}}', grafana_name))
+        address = ipaddress.IPv4Address(networks[prefix]['IPAddress'])
+        if not address.is_private:
+            raise ValueError('Expected internal fixture address')
+        url = f'http://{address}:3000'
         ready(url + '/api/health')
         ready(url + '/api/dashboards/uid/agentic-engineering-draft')
         dashboard = get(url + '/api/dashboards/uid/agentic-engineering-draft')['dashboard']
