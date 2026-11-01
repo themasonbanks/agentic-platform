@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        root: [terraform/bootstrap, terraform/modules/static_site, terraform/environments/development]
+        root: [terraform/bootstrap, terraform/modules/static_site, terraform/modules/hosting_environment, terraform/environments/development, terraform/environments/production]
     defaults:
       run:
         working-directory: ${{ matrix.root }}

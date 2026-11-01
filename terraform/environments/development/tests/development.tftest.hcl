@@ -27,19 +27,11 @@ variables {
   free_plan_eligibility_confirmed = true
   global_waf_region_approved      = true
 }
-run "composed_development_controls" {
+run "environment_composition" {
   command = apply
   assert {
-    condition     = aws_kms_key.content.enable_key_rotation && aws_kms_key.content.deletion_window_in_days == 30
-    error_message = "Content key needs rotation and a reviewed recovery window."
-  }
-  assert {
-    condition     = jsondecode(aws_kms_key_policy.content.policy).Statement[1].Condition.StringEquals["AWS:SourceArn"] == "arn:aws:cloudfront::123456789012:distribution/FIXTURE" && jsondecode(aws_kms_key_policy.content.policy).Statement[1].Action == "kms:Decrypt"
-    error_message = "CloudFront may only decrypt for this distribution."
-  }
-  assert {
-    condition     = aws_wafv2_web_acl.site.scope == "CLOUDFRONT" && one(aws_wafv2_web_acl.site.rule).statement[0].rate_based_statement[0].limit == 2000 && !one(aws_wafv2_web_acl.site.visibility_config).sampled_requests_enabled
-    error_message = "Use dedicated global rate protection without sampled request payloads."
+    condition     = output.environment == "development" && output.preview_url == "https://fixture.cloudfront.net"
+    error_message = "The root must compose the correct environment and preview output."
   }
 }
 run "reject_unapproved_global_region" {

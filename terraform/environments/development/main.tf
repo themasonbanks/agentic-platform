@@ -35,73 +35,15 @@ provider "aws" {
   allowed_account_ids = [var.aws_account_id]
   default_tags { tags = { Environment = "development", ManagedBy = "Terraform" } }
 }
-resource "aws_wafv2_web_acl" "site" {
-  provider = aws.global
-  name     = "${var.bucket_name}-development"
-  scope    = "CLOUDFRONT"
-  default_action {
-    allow {}
-  }
-  rule {
-    name     = "per-ip-rate-limit"
-    priority = 0
-    action {
-      block {}
-    }
-    statement {
-      rate_based_statement {
-        limit                 = 2000
-        aggregate_key_type    = "IP"
-        evaluation_window_sec = 300
-      }
-    }
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      sampled_requests_enabled   = false
-      metric_name                = "development-ip-rate-limit"
-    }
-  }
-  visibility_config {
-    cloudwatch_metrics_enabled = true
-    sampled_requests_enabled   = false
-    metric_name                = "development-static-site"
-  }
-}
-resource "aws_kms_key" "content" {
-  description             = "Development static content encryption"
-  enable_key_rotation     = true
-  deletion_window_in_days = 30
-  lifecycle { prevent_destroy = true }
-}
-resource "aws_kms_key_policy" "content" {
-  key_id = aws_kms_key.content.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AccountAdministration", Effect = "Allow"
-        Principal = { AWS = "arn:aws:iam::${var.aws_account_id}:root" }
-        Action    = "kms:*", Resource = "*"
-      },
-      {
-        Sid       = "DistributionReadOnly", Effect = "Allow"
-        Principal = { Service = "cloudfront.amazonaws.com" }
-        Action    = "kms:Decrypt", Resource = "*"
-        Condition = { StringEquals = { "AWS:SourceArn" = module.site.distribution_arn } }
-      }
-    ]
-  })
-}
-module "site" {
-  source                          = "../../modules/static_site"
+module "environment" {
+  source                          = "../../modules/hosting_environment"
+  providers                       = { aws = aws, aws.global = aws.global }
+  aws_account_id                  = var.aws_account_id
   bucket_name                     = var.bucket_name
   free_plan_eligibility_confirmed = var.free_plan_eligibility_confirmed
-  web_acl_arn                     = aws_wafv2_web_acl.site.arn
-  content_kms_key_arn             = aws_kms_key.content.arn
+  environment                     = "development"
 }
-output "preview_url" {
-  value      = module.site.preview_url
-  depends_on = [aws_kms_key_policy.content]
-}
-output "pricing_plan_status" { value = module.site.pricing_plan_status }
-output "pricing_plan_arn" { value = module.site.pricing_plan_arn }
+output "preview_url" { value = module.environment.preview_url }
+output "pricing_plan_status" { value = module.environment.pricing_plan_status }
+output "pricing_plan_arn" { value = module.environment.pricing_plan_arn }
+output "environment" { value = module.environment.environment }

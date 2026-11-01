@@ -1,0 +1,11 @@
+# Production hosting root (not provisioned)
+
+This root uses the same reviewed hosting_environment module as development, with environment fixed to production, separate tags and a distinct backend key/workspace prefix. Supply a separate globally unique bucket name; its content KMS key and global WAF are independent resources in this state. London/account restrictions and the global WAF/Free-plan eligibility confirmations remain mandatory.
+
+production_release_approved defaults false and stops an unacknowledged plan. It is a preflight acknowledgement, not an authorization boundary: passing true does not establish human approval. No production apply workflow exists. Before any automated release, require the protected production GitHub environment, protected main only, the explicit human reviewer and a separately reviewed deployment role. Never attach production credentials to PR-controlled code. Do not run a production apply or create resources under the authority to merge code alone.
+
+Complete and verify development first, including secure temporary access, remote-state locking/recovery, a priced owner-approved plan, live subscription/OAC/TLS checks, upload headers/invalidation, Sentry and telemetry. Initialize the reviewed production S3 backend from backend examples using the production state path, never the development path. Copy terraform.tfvars.example to ignored terraform.tfvars and keep actual plans/state/backend settings private. The state-only bootstrap roles still lack application provisioning permissions; define/review separate permissions before CI use.
+
+AWS currently allows only3 FREE CloudFront plans per account. Development and production each consume a slot; other apps/previews share that account quota. Verify availability and all uncovered KMS/S3/logging/retention costs before planning. Do not auto-upgrade, create a pay-as-you-go fallback or cancel a FREE plan to free a slot: surviving resources revert immediately to pay-as-you-go. Manual retention/recovery/disable/destroy review remains required.
+
+Three mock runs verify production composition and reject unapproved global-region/release inputs. They do not prove GitHub protection rules, production credentials or deployment. This root has not been applied.
