@@ -60,16 +60,16 @@
     "definition": "Owner-confirmed post-release defects linked to deployment; no automatic inference from every Sentry event."
   },
   {
-    "panel": "Reported AWS month-to-date cost",
+    "panel": "Reported AWS month-to-date cost (partial)",
     "query": "sum(agentic_aws_month_cost_usd{repository=~\"${repository:regex}\"})",
     "unit": "currencyUSD",
-    "definition": "Billing-source actual month-to-date value; delayed and potentially incomplete until invoice reconciliation."
+    "definition": "Billing-source actual month-to-date value; delayed and potentially incomplete until invoice reconciliation. Cross-repository total is partial when any selected source is missing."
   },
   {
-    "panel": "Reported telemetry month-to-date cost",
+    "panel": "Reported telemetry month-to-date cost (partial)",
     "query": "sum(agentic_telemetry_month_cost_usd{repository=~\"${repository:regex}\"})",
     "unit": "currencyUSD",
-    "definition": "Provider-reported usage charges, not an estimate from span counts."
+    "definition": "Provider-reported usage charges, not an estimate from span counts. Cross-repository total is partial when any selected source is missing."
   },
   {
     "panel": "Oldest pending remediation",
