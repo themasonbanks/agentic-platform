@@ -1,5 +1,8 @@
 """Normalize source metadata without retaining provider payloads or text."""
 from datetime import datetime
+import hashlib
+import json
+import re
 
 
 def timestamp_ns(value):
@@ -49,3 +52,37 @@ def codex_turn(store, event, event_id, repository, issue, run_id, sha, observed_
     return store.append('agent', event_id, repository, issue,
                         'success' if event['type'] == 'turn.completed' else 'failure',
                         observed_ns, attributes)
+
+
+def pull_request_review(store, payload, issue, inline_evidence=None):
+    if payload['action'] != 'submitted':
+        return False
+    review, pr = payload['review'], payload['pull_request']
+    state, identity = review['state'], review['id']
+    if (not isinstance(state, str) or state not in {'approved', 'changes_requested', 'commented'}
+            or type(identity) is not int or not 0 < identity <= 9_223_372_036_854_775_807
+            or type(pr['number']) is not int or not 0 < pr['number'] <= 9_223_372_036_854_775_807
+            or not isinstance(review.get('commit_id'), str) or not re.fullmatch('[0-9a-f]{40}', review['commit_id'])
+            or not isinstance(review.get('submitted_at'), str)):
+        raise ValueError('Submitted review identity and state required')
+    observed_ns = timestamp_ns(review['submitted_at'])
+    if not 0 <= observed_ns <= 9_223_372_036_854_775_807:
+        raise ValueError('Bounded submitted-review timestamp required')
+    repository = payload['repository']['full_name']
+    key = hashlib.sha256(json.dumps([repository, pr['number'], identity]).encode()).hexdigest()
+    event_id = 'review:' + key
+    existing = store.db.execute('SELECT payload FROM engineering_events WHERE source=? AND event_id=?',
+                                ('github', event_id)).fetchone()
+    if existing:
+        classification = json.loads(existing[0])['attributes']['review_classification']
+    elif state in {'approved', 'changes_requested'}:
+        classification = 'decision'
+    else:
+        evidence = inline_evidence(repository, pr['number'], identity) if inline_evidence is not None else False
+        if type(evidence) is not bool:
+            raise ValueError('Explicit trusted inline evidence required')
+        classification = 'inline' if evidence else 'unclassified'
+    return store.append('github', event_id, repository, issue, 'reviewed',
+                        observed_ns,
+                        {'pr': pr['number'], 'sha': review['commit_id'], 'review_id': identity,
+                         'review_state': state, 'review_classification': classification})

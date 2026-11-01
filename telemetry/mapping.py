@@ -16,7 +16,7 @@ class IssueResolver:
                     raise ValueError('Verified repository, identity and issue mapping required')
 
     def __call__(self, repository, event, payload):
-        if event == 'pull_request':
+        if event in {'pull_request', 'pull_request_review'}:
             source = payload['pull_request']
             numbers = [source['number']]
             sha = source['head']['sha']

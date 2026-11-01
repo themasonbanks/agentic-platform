@@ -6,9 +6,9 @@ import sqlite3
 
 SOURCES = {'agent', 'ci', 'github', 'linear'}
 KINDS = {'queued', 'running', 'success', 'failure', 'opened', 'merged', 'closed',
-         'backlog', 'todo', 'in_progress', 'done', 'cancelled', 'skipped', 'neutral', 'unknown'}
-NUMBERS = {'pr', 'duration_ms', 'retry_count', 'input_tokens', 'output_tokens', 'cost_microusd'}
-IDENTIFIERS = {'run_id', 'sha', 'model'}
+         'backlog', 'todo', 'in_progress', 'done', 'cancelled', 'skipped', 'neutral', 'unknown', 'reviewed'}
+NUMBERS = {'pr', 'duration_ms', 'retry_count', 'input_tokens', 'output_tokens', 'cost_microusd', 'review_id'}
+IDENTIFIERS = {'run_id', 'sha', 'model', 'review_state', 'review_classification'}
 
 
 class EventStore:
@@ -43,6 +43,13 @@ class EventStore:
                 raise ValueError('Invalid metadata identifier')
             if key == 'sha' and not re.fullmatch('[0-9a-f]{40}', value):
                 raise ValueError('Exact commit SHA required')
+        if kind == 'reviewed':
+            if (source != 'github' or set(attributes) != {'pr', 'sha', 'review_id', 'review_state', 'review_classification'}
+                    or not attributes.get('pr') or not attributes.get('review_id')
+                    or attributes['review_state'] not in {'approved', 'changes_requested', 'commented'}
+                    or attributes['review_classification'] not in (
+                        {'decision'} if attributes['review_state'] != 'commented' else {'inline', 'unclassified'})):
+                raise ValueError('Explicit review identity, state and evidence classification required')
         trace_id = hashlib.sha256((repository + '\0' + issue).encode()).hexdigest()[:32]
         span_id = hashlib.sha256((source + '\0' + event_id).encode()).hexdigest()[:16]
         payload = {'source': source, 'event_id': event_id, 'repository': repository,

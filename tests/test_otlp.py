@@ -17,6 +17,7 @@ from telemetry.otel import export_pending
 from telemetry.otlp import OtlpExporter
 from telemetry.mapping import IssueResolver
 from telemetry.metrics import render_metrics
+from telemetry.reviews import InlineReviewEvidence
 from telemetry.service import create_application
 from telemetry.sources import codex_turn
 
@@ -93,7 +94,11 @@ class OtlpTests(unittest.TestCase):
             resolver = IssueResolver({('owner/app', 3): 'KEB-130'}, {})
             app = create_application(lambda: sqlite3.connect(path), secret, {'owner/app': 42},
                                      resolver, secret, 'org', {'issue': ('owner/app', 'KEB-130')},
-                                     {'state': 'done'}, now_ms=lambda: 1000000)
+                                     {'state': 'done'}, now_ms=lambda: 1000000,
+                                     inline_evidence=InlineReviewEvidence(lambda route: [
+                                         {'id': 91, 'pull_request_review_id': 17, 'path': 'src/example.py',
+                                          'position': 4, 'body': 'private-fixture-marker'}]
+                                         if '/reviews/17/' in route else []))
             def deliver(route, payload, event=None):
                 body = json.dumps(payload).encode()
                 signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
@@ -115,6 +120,13 @@ class OtlpTests(unittest.TestCase):
                 'id': 9, 'run_attempt': 1, 'status': 'completed', 'conclusion': 'success',
                 'head_sha': 'a' * 40, 'updated_at': '2026-11-01T12:01:00Z',
                 'pull_requests': [{'number': 3}]}), 'workflow_run')
+            for review_id in (17, 18):
+                review = dict(repo, action='submitted', pull_request={
+                    'number': 3, 'head': {'sha': 'a' * 40}}, review={
+                    'id': review_id, 'state': 'commented', 'commit_id': 'a' * 40,
+                    'submitted_at': '2026-11-01T12:01:30Z', 'body': 'private-fixture-marker'})
+                deliver('/webhooks/github', review, 'pull_request_review')
+                deliver('/webhooks/github', review, 'pull_request_review')
             deliver('/webhooks/linear', {'organizationId': 'org', 'webhookTimestamp': 1000000,
                                         'type': 'Issue', 'action': 'update', 'data': {
                                             'id': 'issue', 'stateId': 'state',
@@ -125,14 +137,16 @@ class OtlpTests(unittest.TestCase):
                 codex_turn(store, {'type': 'turn.completed', 'usage': {'input_tokens': 11,
                            'output_tokens': 4}, 'prompt': 'private-fixture-marker'},
                            'turn', 'owner/app', 'KEB-130', 'run', 'a' * 40, 1000000)
-                self.assertEqual(export_pending(store, self.exporter), 4)
+                self.assertEqual(export_pending(store, self.exporter), 6)
                 self.assertEqual(store.pending(), [])
                 metrics = render_metrics(db, ['owner/app'])
                 self.assertIn('type="input"} 11\n', metrics)
                 self.assertIn('attempt="1",outcome="success"} 1\n', metrics)
+                self.assertIn('agentic_review_cycles_total{repository="owner/app"} 1\n', metrics)
+                self.assertIn('agentic_review_unclassified_total{repository="owner/app"} 1\n', metrics)
             spans = [ExportTraceServiceRequest.FromString(body).resource_spans[0].scope_spans[0].spans[0]
                      for _, _, body in self.requests]
             self.assertEqual(len({span.trace_id for span in spans}), 1)
-            self.assertEqual(len({span.span_id for span in spans}), 4)
+            self.assertEqual(len({span.span_id for span in spans}), 6)
             self.assertEqual({span.name.split('.')[1] for span in spans}, {'agent', 'ci', 'github', 'linear'})
             self.assertNotIn(b'private-fixture-marker', b''.join(body for _, _, body in self.requests))

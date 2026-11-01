@@ -2,10 +2,10 @@
 import hashlib
 import hmac
 import json
-from telemetry.sources import pull_request, workflow_run
+from telemetry.sources import pull_request, pull_request_review, workflow_run
 
 
-def receive(store, event, body, signature, secret, installations, resolve_issue):
+def receive(store, event, body, signature, secret, installations, resolve_issue, inline_evidence=None):
     if not isinstance(secret, bytes) or len(secret) < 32 or not installations:
         raise ValueError('Explicit webhook secret and installation allowlist required')
     if not isinstance(body, bytes) or not 0 < len(body) <= 1_048_576:
@@ -13,7 +13,7 @@ def receive(store, event, body, signature, secret, installations, resolve_issue)
     expected = 'sha256=' + hmac.new(secret, body, hashlib.sha256).hexdigest()
     if not isinstance(signature, str) or not hmac.compare_digest(expected, signature):
         raise ValueError('Invalid GitHub signature')
-    if event not in {'workflow_run', 'pull_request'}:
+    if event not in {'workflow_run', 'pull_request', 'pull_request_review'}:
         return False
     payload = json.loads(body)
     repository = payload['repository']['full_name']
@@ -25,6 +25,8 @@ def receive(store, event, body, signature, secret, installations, resolve_issue)
         raise ValueError('Verified issue mapping required')
     if event == 'workflow_run':
         return workflow_run(store, payload, issue)
+    if event == 'pull_request_review':
+        return pull_request_review(store, payload, issue, inline_evidence)
     pr = payload['pull_request']
     identity = [repository, payload['action'], pr['number'], pr['updated_at'],
                 pr['head']['sha'], pr['state'], pr['merged']]
