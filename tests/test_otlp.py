@@ -28,17 +28,19 @@ class OtlpTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.store = EventStore(self.db)
         self.store.append('github', 'fixture', 'owner/app', 'KEB-130', 'opened', 1000000, {'pr': 3})
-        self.status, self.response, self.requests = 200, b'', []
+        self.status, self.response, self.requests, self.responses = 200, b'', [], []
         owner = self
         class Receiver(BaseHTTPRequestHandler):
             def do_POST(self):
                 owner.requests.append((self.path, self.headers,
                                        self.rfile.read(int(self.headers['Content-Length']))))
-                self.send_response(owner.status)
+                status, response = owner.responses.pop(0) if owner.responses else (owner.status, owner.response)
+                self.send_response(status)
                 self.send_header('Location', '/redirected')
-                self.send_header('Content-Length', str(len(owner.response)))
+                self.send_header('Content-Type', 'application/x-protobuf')
+                self.send_header('Content-Length', str(len(response)))
                 self.end_headers()
-                self.wfile.write(owner.response)
+                self.wfile.write(response)
 
             def log_message(self, *args):
                 pass
@@ -66,16 +68,49 @@ class OtlpTests(unittest.TestCase):
         self.assertEqual(span.name, 'engineering.github.opened')
         self.assertEqual(self.store.pending(), [])
 
-    def test_redirect_error_and_partial_rejection_keep_outbox_pending(self):
-        partial = ExportTraceServiceResponse()
-        partial.partial_success.rejected_spans = 1
-        for status, response in [(302, b''), (401, b''), (503, b''),
-                                 (200, partial.SerializeToString()), (200, b'invalid protobuf')]:
+    def test_transient_errors_and_invalid_ack_keep_outbox_eligible(self):
+        for status, response in [(429, b''), (502, b''), (503, b''), (504, b''), (200, b'invalid protobuf')]:
             with self.subTest(status=status, response=response):
                 self.status, self.response = status, response
                 before = len(self.requests)
                 self.assertEqual(export_pending(self.store, self.exporter), 0)
                 self.assertEqual(len(self.store.pending()), 1)
+                self.assertEqual(len(self.requests), before + 1)
+
+    def test_warning_only_ack_is_accepted_once(self):
+        warning = ExportTraceServiceResponse()
+        warning.partial_success.error_message = 'private-fixture-warning'
+        self.response = warning.SerializeToString()
+        self.assertEqual(export_pending(self.store, self.exporter), 1)
+        self.assertEqual(export_pending(self.store, self.exporter), 0)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.store.pending(), [])
+        self.assertNotIn('private-fixture-warning', '\n'.join(self.db.iterdump()))
+
+    def test_partial_rejection_is_quarantined_without_blocking_later_events(self):
+        rejected = ExportTraceServiceResponse()
+        rejected.partial_success.rejected_spans = 1
+        rejected.partial_success.error_message = 'private-fixture-rejection'
+        self.responses = [(200, rejected.SerializeToString()), (200, b'')]
+        self.store.append('github', 'later', 'owner/app', 'KEB-130', 'opened', 2000000, {'pr': 4})
+        self.assertEqual(export_pending(self.store, self.exporter), 1)
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(self.db.execute('SELECT event_id FROM engineering_export_quarantine').fetchall(), [('fixture',)])
+        self.assertEqual(self.db.execute('SELECT event_id FROM engineering_events WHERE exported=1').fetchall(), [('later',)])
+        self.assertEqual(export_pending(EventStore(self.db), self.exporter), 0)
+        self.assertEqual(len(self.requests), 2)
+        self.assertNotIn('private-fixture-rejection', '\n'.join(self.db.iterdump()))
+
+    def test_permanent_http_errors_and_response_limit_are_not_retried(self):
+        for status, response in [(302, b''), (400, b''), (401, b''), (413, b''), (500, b''), (200, b'x' * 65537)]:
+            with self.subTest(status=status), closing(sqlite3.connect(':memory:')) as db:
+                store = EventStore(db)
+                store.append('github', 'fixture', 'owner/app', 'KEB-130', 'opened', 1, {'pr': 3})
+                self.status, self.response = status, response
+                before = len(self.requests)
+                self.assertEqual(export_pending(store, self.exporter), 0)
+                self.assertEqual(db.execute('SELECT count(*) FROM engineering_export_quarantine').fetchone()[0], 1)
+                self.assertEqual(export_pending(store, self.exporter), 0)
                 self.assertEqual(len(self.requests), before + 1)
 
     def test_destination_and_credential_validation(self):

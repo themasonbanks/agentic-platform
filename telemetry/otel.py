@@ -9,10 +9,11 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, Sp
 
 class ConfirmingExporter(SpanExporter):
     def __init__(self, target):
-        self.target, self.result = target, None
+        self.target, self.result, self.permanent_failure = target, None, False
 
     def export(self, spans):
         self.result = self.target.export(spans)
+        self.permanent_failure = getattr(self.target, 'permanent_failure', False) is True
         return self.result
 
 
@@ -38,6 +39,7 @@ def export_pending(store, exporter, limit=100):
                       'usage_known': event['usage_known']}
         attributes.update({k: v for k, v in event['attributes'].items() if v is not None})
         confirmed.result = None
+        confirmed.permanent_failure = False
         span = tracer.start_span('engineering.' + event['source'] + '.' + event['kind'],
                                  context=trace.set_span_in_context(trace.NonRecordingSpan(parent)),
                                  start_time=event['observed_ns'], attributes=attributes)
@@ -46,6 +48,10 @@ def export_pending(store, exporter, limit=100):
         duration = event['attributes'].get('duration_ms') or 0
         span.end(end_time=event['observed_ns'] + max(duration * 1_000_000, 1))
         if confirmed.result != SpanExportResult.SUCCESS:
+            if confirmed.permanent_failure:
+                if store.quarantine_claim(event['source'], event['event_id'], worker, time.time_ns()):
+                    continue
+                break
             store.release_claim(event['source'], event['event_id'], worker)
             break
         if not store.acknowledge_claim(event['source'], event['event_id'], worker, time.time_ns()):

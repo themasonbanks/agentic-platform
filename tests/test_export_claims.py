@@ -44,3 +44,14 @@ class ClaimTests(unittest.TestCase):
                                     (self.worker_a, 100, 0), (self.worker_a, 100, 300_000_000_001)]:
             with self.assertRaises(ValueError):
                 self.first.claim_next(worker, now, lease)
+
+    def test_quarantine_fences_expired_worker_and_survives_recreation(self):
+        self.first.claim_next(self.worker_a, 100, 100)
+        self.assertFalse(self.second.quarantine_claim('ci', 'event', self.worker_b, 101))
+        self.assertIsNotNone(self.second.claim_next(self.worker_b, 200, 100))
+        self.assertFalse(self.first.quarantine_claim('ci', 'event', self.worker_a, 201))
+        self.assertTrue(self.second.quarantine_claim('ci', 'event', self.worker_b, 202))
+        self.assertIsNone(EventStore(self.first_db).claim_next(self.worker_a, 1000, 100))
+        self.assertEqual(len(self.first.pending()), 1)
+        self.assertEqual(self.first_db.execute('SELECT exported FROM engineering_events').fetchone()[0], 0)
+        self.assertEqual(self.first_db.execute('SELECT count(*) FROM engineering_export_quarantine').fetchone()[0], 1)

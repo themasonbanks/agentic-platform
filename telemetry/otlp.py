@@ -25,26 +25,31 @@ class OtlpExporter(SpanExporter):
         if authorization:
             self.session.headers['Authorization'] = authorization
         self.closed = False
+        self.permanent_failure = False
 
     def export(self, spans):
+        self.permanent_failure = False
         if self.closed:
             return SpanExportResult.FAILURE
         body = encode_spans(spans).SerializeToString()
         if len(body) > 1_048_576:
+            self.permanent_failure = True
             return SpanExportResult.FAILURE
         try:
             with self.session.post(self.endpoint, data=body, timeout=(3, 5),
                                    allow_redirects=False, stream=True) as response:
                 if response.status_code != 200:
+                    self.permanent_failure = response.status_code not in {429, 502, 503, 504}
                     return SpanExportResult.FAILURE
                 result = bytearray()
                 for chunk in response.iter_content(4096):
                     result.extend(chunk)
                     if len(result) > 65536:
+                        self.permanent_failure = True
                         return SpanExportResult.FAILURE
                 acknowledgement = ExportTraceServiceResponse.FromString(bytes(result))
-                if (acknowledgement.partial_success.rejected_spans
-                        or acknowledgement.partial_success.error_message):
+                if acknowledgement.partial_success.rejected_spans:
+                    self.permanent_failure = True
                     return SpanExportResult.FAILURE
         except (requests.RequestException, DecodeError):
             return SpanExportResult.FAILURE

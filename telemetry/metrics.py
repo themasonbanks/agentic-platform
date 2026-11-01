@@ -5,12 +5,18 @@ import re
 import time
 
 
-def render_metrics(db, repositories, max_events=100000, now_ns=None):
-    repositories = frozenset(repositories)
-    if (not repositories or len(repositories) > 100
-            or any(not re.fullmatch(r'[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+', repo) for repo in repositories)
-            or type(max_events) is not int or not 1 <= max_events <= 1000000):
+def repository_scope(repositories):
+    if (not isinstance(repositories, (list, tuple, set, frozenset)) or not 1 <= len(repositories) <= 100
+            or any(not isinstance(repo, str) or not re.fullmatch(r'[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+', repo)
+                   for repo in repositories)):
         raise ValueError('Bounded explicit repository scope required')
+    return frozenset(repositories)
+
+
+def render_metrics(db, repositories, max_events=100000, now_ns=None):
+    repositories = repository_scope(repositories)
+    if type(max_events) is not int or not 1 <= max_events <= 1000000:
+        raise ValueError('Bounded event history required')
     now_ns = time.time_ns() if now_ns is None else now_ns
     if type(now_ns) is not int or not 0 <= now_ns <= 9_223_372_036_854_775_807:
         raise ValueError('Bounded trusted scrape timestamp required')

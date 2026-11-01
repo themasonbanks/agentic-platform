@@ -2,14 +2,14 @@
 from contextlib import closing
 import hmac
 import sqlite3
-from telemetry.metrics import render_metrics
+from telemetry.metrics import render_metrics, repository_scope
 
 
 def create_metrics_application(connect, token, repositories):
     if (not isinstance(token, str) or not 32 <= len(token) <= 8192
             or any(ord(c) < 33 or ord(c) > 126 for c in token)):
         raise ValueError('Explicit scraper credential required')
-    repositories = tuple(repositories)
+    repositories = repository_scope(repositories)
 
     def app(environ, start_response):
         status, body, content_type = '401 Unauthorized', b'request rejected\n', 'text/plain'

@@ -64,7 +64,9 @@ class MetricsTests(unittest.TestCase):
             def connect():
                 calls.append(True)
                 return sqlite3.connect('file:' + path + '?mode=ro', uri=True)
-            app = create_metrics_application(connect, 'fixture-token-' * 4, ['owner/app'])
+            scope = ['owner/app']
+            app = create_metrics_application(connect, 'fixture-token-' * 4, scope)
+            scope.clear()
             def request(authorization):
                 result = []
                 body = b''.join(app({'PATH_INFO': '/metrics', 'REQUEST_METHOD': 'GET',
@@ -78,3 +80,11 @@ class MetricsTests(unittest.TestCase):
             self.assertIn(('Content-Type', 'text/plain; version=0.0.4; charset=utf-8'), headers)
             self.assertIn(b'type="input"} 7\n', body)
             self.assertEqual(len(calls), 1)
+
+    def test_scrape_scope_configuration_fails_before_startup(self):
+        calls = []
+        for scope in ('owner/app', b'owner/app', None, [], {}, [None], [['owner/app']],
+                      ['owner/app/extra'], ['owner/app'] * 101, iter(['owner/app'])):
+            with self.subTest(scope=scope), self.assertRaises(ValueError):
+                create_metrics_application(lambda: calls.append(True), 'fixture-token-' * 4, scope)
+        self.assertEqual(calls, [])

@@ -35,9 +35,9 @@ class WorkerTests(unittest.TestCase):
             exporters.append(exporter)
             return exporter
         self.assertEqual(run_once(self.path, 'fixture', 'private-fixture', 'fixture',
-                                  exporter_factory=factory), {'delivered': 1, 'pending': 0})
+                                  exporter_factory=factory), {'delivered': 1, 'pending': 0, 'quarantined': 0})
         self.assertEqual(run_once(self.path, 'fixture', 'private-fixture', 'fixture',
-                                  exporter_factory=factory), {'delivered': 0, 'pending': 0})
+                                  exporter_factory=factory), {'delivered': 0, 'pending': 0, 'quarantined': 0})
         self.assertTrue(all(exporter.closed for exporter in exporters))
 
     def test_unprotected_or_symlink_database_rejected_before_exporter(self):
@@ -63,9 +63,12 @@ class WorkerTests(unittest.TestCase):
         config = dict.fromkeys(('AGENTIC_TELEMETRY_DB', 'AGENTIC_OTLP_TRACES_ENDPOINT',
                                'AGENTIC_OTLP_AUTHORIZATION', 'AGENTIC_OTLP_HOST'), 'fixture')
         with patch.dict(os.environ, config, clear=True), patch('telemetry.worker.run_once') as run:
-            run.return_value = {'delivered': 1, 'pending': 1}
+            run.return_value = {'delivered': 1, 'pending': 1, 'quarantined': 0}
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(), 75)
-            run.return_value = {'delivered': 100, 'pending': 1}
+            run.return_value = {'delivered': 100, 'pending': 1, 'quarantined': 0}
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(), 0)
+            run.return_value = {'delivered': 0, 'pending': 0, 'quarantined': 1}
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(), 75)

@@ -25,12 +25,15 @@ def run_once(database, endpoint, authorization, expected_host, limit=100,
             db.execute('SELECT source,event_id,exported FROM engineering_events LIMIT 0')
             store = EventStore(db)
             delivered = export_pending(store, exporter, limit)
-            remaining = db.execute('SELECT COUNT(*) FROM engineering_events WHERE exported=0').fetchone()[0]
+            remaining = db.execute('''SELECT COUNT(*) FROM engineering_events e WHERE exported=0
+                AND NOT EXISTS(SELECT 1 FROM engineering_export_quarantine q
+                               WHERE e.source=q.source AND e.event_id=q.event_id)''').fetchone()[0]
+            quarantined = db.execute('SELECT COUNT(*) FROM engineering_export_quarantine').fetchone()[0]
         finally:
             db.close()
     finally:
         exporter.shutdown()
-    return {'delivered': delivered, 'pending': remaining}
+    return {'delivered': delivered, 'pending': remaining, 'quarantined': quarantined}
 
 
 def main():
@@ -43,7 +46,7 @@ def main():
         print(json.dumps({'status': 'unavailable'}))
         return 75
     print(json.dumps(result, sort_keys=True))
-    return 75 if result['pending'] and result['delivered'] < 100 else 0
+    return 75 if result['quarantined'] or result['pending'] and result['delivered'] < 100 else 0
 
 
 if __name__ == '__main__':

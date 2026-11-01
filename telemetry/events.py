@@ -28,6 +28,9 @@ class EventStore:
             sequence INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL,
             event_id TEXT NOT NULL, received_ns INTEGER NOT NULL,
             UNIQUE(source,event_id))''')
+        db.execute('''CREATE TABLE IF NOT EXISTS engineering_export_quarantine (
+            source TEXT NOT NULL,event_id TEXT NOT NULL,quarantined_ns INTEGER NOT NULL,
+            PRIMARY KEY(source,event_id))''')
         db.commit()
 
     def append(self, source, event_id, repository, issue, kind, observed_ns, attributes):
@@ -103,7 +106,8 @@ class EventStore:
             row = self.db.execute('''SELECT e.source,e.event_id,e.trace_id,e.span_id,e.payload
                 FROM engineering_events e LEFT JOIN engineering_export_claims c
                 ON e.source=c.source AND e.event_id=c.event_id
-                WHERE e.exported=0 AND (c.worker IS NULL OR c.expires_ns<=?)
+                LEFT JOIN engineering_export_quarantine q ON e.source=q.source AND e.event_id=q.event_id
+                WHERE e.exported=0 AND q.source IS NULL AND (c.worker IS NULL OR c.expires_ns<=?)
                 ORDER BY e.observed_ns,e.source,e.event_id LIMIT 1''', (now_ns,)).fetchone()
             if row is None:
                 return None
@@ -131,3 +135,19 @@ class EventStore:
         with self.db:
             self.db.execute('DELETE FROM engineering_export_claims WHERE source=? AND event_id=? AND worker=?',
                             (source, event_id, worker))
+
+    def quarantine_claim(self, source, event_id, worker, now_ns):
+        if type(now_ns) is not int or not 0 <= now_ns <= 9_223_372_036_854_775_807:
+            raise ValueError('Trusted receiver timestamp required')
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            claim = self.db.execute('''SELECT c.worker,c.expires_ns,e.exported
+                FROM engineering_export_claims c JOIN engineering_events e
+                ON c.source=e.source AND c.event_id=e.event_id WHERE c.source=? AND c.event_id=?''',
+                (source, event_id)).fetchone()
+            if claim is None or claim[0] != worker or claim[1] <= now_ns or claim[2] != 0:
+                return False
+            self.db.execute('INSERT OR IGNORE INTO engineering_export_quarantine VALUES(?,?,?)',
+                            (source, event_id, now_ns))
+            self.db.execute('DELETE FROM engineering_export_claims WHERE source=? AND event_id=?', (source, event_id))
+        return True

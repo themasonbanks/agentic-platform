@@ -1,5 +1,6 @@
 """Verify durable timing, replay freshness and clock anomalies without estimates."""
 import json
+from contextlib import closing
 import sqlite3
 import unittest
 from telemetry.events import EventStore
@@ -85,7 +86,7 @@ class ReceiptTests(unittest.TestCase):
                 render_metrics(self.db, ['owner/app'], now_ns=now)
 
     def test_existing_event_schema_gets_no_invented_legacy_receipt(self):
-        with sqlite3.connect(':memory:') as db:
+        with closing(sqlite3.connect(':memory:')) as db:
             db.execute('''CREATE TABLE engineering_events(source TEXT NOT NULL,event_id TEXT NOT NULL,
                 observed_ns INTEGER NOT NULL,trace_id TEXT NOT NULL,span_id TEXT NOT NULL,
                 payload TEXT NOT NULL,exported INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(source,event_id))''')
