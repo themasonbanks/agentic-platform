@@ -3,7 +3,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"
+      version = "~> 6.71"
     }
   }
 }
@@ -12,6 +12,14 @@ variable "bucket_name" {
   validation {
     condition     = can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.bucket_name))
     error_message = "Supply a unique reviewed bucket name."
+  }
+}
+variable "free_plan_eligibility_confirmed" {
+  type    = bool
+  default = false
+  validation {
+    condition     = var.free_plan_eligibility_confirmed
+    error_message = "Verify account eligibility, dedicated WAF and FREE-plan feature limits before planning hosting."
   }
 }
 variable "web_acl_arn" {
@@ -63,6 +71,19 @@ resource "aws_cloudfront_origin_access_control" "site" {
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
 }
+resource "aws_cloudfront_cache_policy" "site" {
+  name        = "${var.bucket_name}-static"
+  min_ttl     = 0
+  default_ttl = 60
+  max_ttl     = 300
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+    cookies_config { cookie_behavior = "none" }
+    headers_config { header_behavior = "none" }
+    query_strings_config { query_string_behavior = "none" }
+  }
+}
 resource "aws_cloudfront_distribution" "site" {
   web_acl_id          = var.web_acl_arn
   enabled             = true
@@ -80,18 +101,19 @@ resource "aws_cloudfront_distribution" "site" {
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     compress               = true
-    min_ttl                = 0
-    default_ttl            = 60
-    max_ttl                = 300
-    forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
-    }
+    cache_policy_id        = aws_cloudfront_cache_policy.site.id
   }
   restrictions {
     geo_restriction { restriction_type = "none" }
   }
   viewer_certificate { cloudfront_default_certificate = true }
+}
+resource "aws_pricingplanmanager_subscription" "site" {
+  plan_family   = "CloudFront"
+  plan_tier     = "FREE"
+  usage_level   = "DEFAULT"
+  resource_arns = [aws_cloudfront_distribution.site.arn, var.web_acl_arn]
+  lifecycle { prevent_destroy = true }
 }
 resource "aws_s3_bucket_policy" "site" {
   bucket = aws_s3_bucket.site.id
@@ -116,3 +138,5 @@ output "bucket_name" { value = aws_s3_bucket.site.id }
 output "distribution_id" { value = aws_cloudfront_distribution.site.id }
 
 output "distribution_arn" { value = aws_cloudfront_distribution.site.arn }
+output "pricing_plan_arn" { value = aws_pricingplanmanager_subscription.site.arn }
+output "pricing_plan_status" { value = aws_pricingplanmanager_subscription.site.status }
