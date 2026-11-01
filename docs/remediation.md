@@ -29,11 +29,17 @@ A separate minimal publisher validates the patch against the original head and p
 Autonomous execution remains disabled until all of these are evidenced:
 
 1. Owner approves App permissions, installation, webhook endpoint, agent identity and monthly ceiling; live signature handling and persistent encrypted storage are verified.
-2. Implement and test the authenticated metadata adapter, isolated coding worker, enforced timeout/cost ledger, patch validator, check rerun and same-branch publisher. No stub is accepted as a working coding adapter.
+2. Validate the metadata adapter with the approved App installation, and implement/test the isolated coding worker, enforced timeout/cost ledger, patch validator, check rerun and same-branch publisher. No stub is accepted as a working coding adapter.
 3. Run a synthetic real CodeRabbit finding through one verified safe fix, same-branch commit, hosted CI rerun and explanation. Run malicious text, stale head, concurrency, delivery retry, exhausted retry and unknown-cost cases; observe needs-human where required.
 4. Mason approves each of the first five dry runs. Persist separate owner identities/approval records outside repository-controlled input and audit the artifacts. The existing dry-run completion field does not satisfy this gate.
 5. Verify that the App cannot approve or merge and that the owner can disable intake/workers immediately. Only then may an explicit owner setting enable autonomous runs within the approved limits.
 
-The current 13 local tests verify intake/scheduling invariants using a fake metadata source. They do not prove a safe code fix, live CI rerun, effective GitHub App permissions, process isolation, hard runtime termination or owner approval. Keep KEB-128 In Progress until those requirements pass.
+The current 19 local tests verify intake/scheduling invariants using a fake metadata source. They do not prove a safe code fix, live CI rerun, effective GitHub App permissions, process isolation, hard runtime termination or owner approval. Keep KEB-128 In Progress until those requirements pass.
 
 References checked 1 November 2026: [GitHub signature validation](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries) and [review-comment events](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review_comment).
+
+## Read-only GitHub adapter
+
+`GitHubReviewSource` implements current PR/comment/thread lookup using `GitHubJSON` and an injected temporary-token provider. The transport uses fixed api.github.com endpoints, refuses redirects, caps responses at 2 MiB and times out each request after ten seconds. It binds comment ID/PR URL, supports only root findings, checks protected/default branches and drafts, and scans at most ten pages of 100 thread roots. Missing threads, replies, incomplete metadata, query errors and invalid pagination fail closed. This bounded lookup intentionally escalates unusually large PRs instead of guessing. The publisher must still recheck the live head immediately before any future branch update.
+
+Six additional adapter tests use fake API responses. A read-only live query verified the thread fields against GitHub; a live approved App installation and full transport integration are still unverified. Do not infer deployed authentication from that schema probe.
