@@ -14,6 +14,20 @@ variable "bucket_name" {
     error_message = "Supply a unique reviewed bucket name."
   }
 }
+variable "web_acl_arn" {
+  type = string
+  validation {
+    condition     = can(regex("^arn:aws:wafv2:us-east-1:[0-9]{12}:global/webacl/.+$", var.web_acl_arn))
+    error_message = "Supply a reviewed CloudFront-scope WAF ARN."
+  }
+}
+variable "content_kms_key_arn" {
+  type = string
+  validation {
+    condition     = can(regex("^arn:aws:kms:eu-west-2:[0-9]{12}:key/.+$", var.content_kms_key_arn))
+    error_message = "Supply a reviewed London content key, separate from state encryption."
+  }
+}
 resource "aws_s3_bucket" "site" {
   bucket        = var.bucket_name
   force_destroy = false
@@ -36,7 +50,11 @@ resource "aws_s3_bucket_versioning" "site" {
 resource "aws_s3_bucket_server_side_encryption_configuration" "site" {
   bucket = aws_s3_bucket.site.id
   rule {
-    apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
+    bucket_key_enabled = true
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = var.content_kms_key_arn
+    }
   }
 }
 resource "aws_cloudfront_origin_access_control" "site" {
@@ -46,6 +64,7 @@ resource "aws_cloudfront_origin_access_control" "site" {
   signing_protocol                  = "sigv4"
 }
 resource "aws_cloudfront_distribution" "site" {
+  web_acl_id          = var.web_acl_arn
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
@@ -95,3 +114,5 @@ resource "aws_s3_bucket_policy" "site" {
 output "preview_url" { value = "https://${aws_cloudfront_distribution.site.domain_name}" }
 output "bucket_name" { value = aws_s3_bucket.site.id }
 output "distribution_id" { value = aws_cloudfront_distribution.site.id }
+
+output "distribution_arn" { value = aws_cloudfront_distribution.site.arn }

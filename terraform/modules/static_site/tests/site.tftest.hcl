@@ -6,9 +6,17 @@ mock_provider "aws" {
     defaults = { arn = "arn:aws:cloudfront::123456789012:distribution/FIXTURE", domain_name = "fixture.cloudfront.net" }
   }
 }
-variables { bucket_name = "site-fixture" }
+variables {
+  bucket_name         = "site-fixture"
+  web_acl_arn         = "arn:aws:wafv2:us-east-1:123456789012:global/webacl/fixture/unit"
+  content_kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/fixture"
+}
 run "private_static_origin" {
   command = apply
+  assert {
+    condition     = aws_cloudfront_distribution.site.web_acl_id == var.web_acl_arn && aws_s3_bucket_server_side_encryption_configuration.site.rule[0].apply_server_side_encryption_by_default[0].kms_master_key_id == var.content_kms_key_arn
+    error_message = "Explicit reviewed WAF and content encryption are required."
+  }
   assert {
     condition     = aws_s3_bucket_public_access_block.site.block_public_acls && aws_s3_bucket_public_access_block.site.block_public_policy && aws_s3_bucket_public_access_block.site.ignore_public_acls && aws_s3_bucket_public_access_block.site.restrict_public_buckets
     error_message = "Origin must block public bucket access."
