@@ -151,7 +151,7 @@ def screenshots(url, start, end, panels, output, report):
                             page.get_by_text(panel['title'], exact=True).first.scroll_into_view_if_needed(timeout=30000)
                         for panel_id in (1, 3, 5):
                             panel = next(item for item in panels if item['id'] == panel_id)
-                            region = page.locator('[aria-label=' + json.dumps(panel['title'] + ' panel') + ']')
+                            region = page.get_by_role('region', name=panel['title'], exact=True)
                             value = EXPECTED[repo][panel_id - 1]
                             expect(region).to_contain_text(re.compile(r'(?<![0-9])' + str(value) + r'(?:\.0+)?\s*%?(?![0-9])'), timeout=30000)
                         report.setdefault('render_checks', []).append({'layout': layout, 'repository': repo, 'panels': [1, 3, 5]})
@@ -226,7 +226,7 @@ def main(output):
         assert len(panels) == 15
         for repository, expected_values in EXPECTED.items():
             for panel, expected in zip(panels, expected_values):
-                expression = panel['targets'][0]['expr'].replace('${repository:regex}', repository)
+                expression = panel['targets'][0]['expr'].replace('${repository}', repository)
                 expression = expression.replace('$__rate_interval', '5m').replace('$__range', '1h')
                 query = urlencode({'query': expression, 'time': end})
                 result = get(url + '/api/datasources/proxy/uid/fixture-metrics/api/v1/query?' + query)

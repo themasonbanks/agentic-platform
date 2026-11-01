@@ -34,7 +34,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum(rate(agentic_runs_total{repository=~\"${repository:regex}\",outcome=\"success\"}[$__rate_interval])) / sum(rate(agentic_runs_total{repository=~\"${repository:regex}\",outcome=~\"success|failure\"}[$__rate_interval]))",
+          "expr": "100 * sum(rate(agentic_runs_total{repository=~\"${repository}\",outcome=\"success\"}[$__rate_interval])) / sum(rate(agentic_runs_total{repository=~\"${repository}\",outcome=~\"success|failure\"}[$__rate_interval]))",
           "instant": true
         }
       ],
@@ -95,7 +95,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum(increase(agentic_ci_attempts_total{repository=~\"${repository:regex}\",attempt=\"1\",outcome=\"success\"}[$__range])) / sum(increase(agentic_ci_attempts_total{repository=~\"${repository:regex}\",attempt=\"1\",outcome=~\"success|failure\"}[$__range]))",
+          "expr": "100 * sum(increase(agentic_ci_attempts_total{repository=~\"${repository}\",attempt=\"1\",outcome=\"success\"}[$__range])) / sum(increase(agentic_ci_attempts_total{repository=~\"${repository}\",attempt=\"1\",outcome=~\"success|failure\"}[$__range]))",
           "instant": true
         }
       ],
@@ -156,7 +156,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(agentic_review_cycles_total{repository=~\"${repository:regex}\"}[$__range]))",
+          "expr": "sum(increase(agentic_review_cycles_total{repository=~\"${repository}\"}[$__range]))",
           "instant": true
         }
       ],
@@ -217,7 +217,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.5,sum by(le)(rate(agentic_issue_to_merge_seconds_bucket{repository=~\"${repository:regex}\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5,sum by(le)(rate(agentic_issue_to_merge_seconds_bucket{repository=~\"${repository}\"}[$__rate_interval])))",
           "instant": true
         }
       ],
@@ -278,7 +278,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(agentic_tokens_total{repository=~\"${repository:regex}\",type=\"input\"}[$__range]))",
+          "expr": "sum(increase(agentic_tokens_total{repository=~\"${repository}\",type=\"input\"}[$__range]))",
           "instant": true
         }
       ],
@@ -339,7 +339,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(agentic_tokens_total{repository=~\"${repository:regex}\",type=\"output\"}[$__range]))",
+          "expr": "sum(increase(agentic_tokens_total{repository=~\"${repository}\",type=\"output\"}[$__range]))",
           "instant": true
         }
       ],
@@ -400,7 +400,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(agentic_cost_usd_total{repository=~\"${repository:regex}\"}[$__range]))",
+          "expr": "sum(increase(agentic_cost_usd_total{repository=~\"${repository}\"}[$__range]))",
           "instant": true
         }
       ],
@@ -461,7 +461,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(agentic_cost_unknown_runs_total{repository=~\"${repository:regex}\"}[$__range]))",
+          "expr": "sum(increase(agentic_cost_unknown_runs_total{repository=~\"${repository}\"}[$__range]))",
           "instant": true
         }
       ],
@@ -522,7 +522,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(agentic_human_interventions_total{repository=~\"${repository:regex}\"}[$__range]))",
+          "expr": "sum(increase(agentic_human_interventions_total{repository=~\"${repository}\"}[$__range]))",
           "instant": true
         }
       ],
@@ -583,7 +583,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(agentic_escaped_defects_total{repository=~\"${repository:regex}\"}[$__range]))",
+          "expr": "sum(increase(agentic_escaped_defects_total{repository=~\"${repository}\"}[$__range]))",
           "instant": true
         }
       ],
@@ -644,7 +644,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(agentic_aws_month_cost_usd{repository=~\"${repository:regex}\"})",
+          "expr": "sum(agentic_aws_month_cost_usd{repository=~\"${repository}\"})",
           "instant": true
         }
       ],
@@ -705,7 +705,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(agentic_telemetry_month_cost_usd{repository=~\"${repository:regex}\"})",
+          "expr": "sum(agentic_telemetry_month_cost_usd{repository=~\"${repository}\"})",
           "instant": true
         }
       ],
@@ -766,7 +766,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(agentic_remediation_pending_age_seconds{repository=~\"${repository:regex}\"})",
+          "expr": "max(agentic_remediation_pending_age_seconds{repository=~\"${repository}\"})",
           "instant": true
         }
       ],
@@ -827,7 +827,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(agentic_deployments_total{repository=~\"${repository:regex}\",outcome=\"failure\"}[$__range]))",
+          "expr": "sum(increase(agentic_deployments_total{repository=~\"${repository}\",outcome=\"failure\"}[$__range]))",
           "instant": true
         }
       ],
@@ -888,7 +888,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(agentic_source_lag_seconds{repository=~\"${repository:regex}\"})",
+          "expr": "max(agentic_source_lag_seconds{repository=~\"${repository}\"})",
           "instant": true
         }
       ],
