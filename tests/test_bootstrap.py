@@ -1,9 +1,13 @@
 """Exercise adoption preflight against disposable application/template repositories."""
 import importlib.util
+import os
 from pathlib import Path
+import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('bootstrap', Path(__file__).parents[1] / 'scripts/bootstrap_project.py')
 bootstrap = importlib.util.module_from_spec(spec)
@@ -85,5 +89,46 @@ class BootstrapTests(unittest.TestCase):
         self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
                  '-c', 'commit.gpgsign=false', 'commit', '-qm', 'workflow fixture')
         with self.assertRaises(ValueError):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_included_clean_filter_is_rejected_before_execution(self):
+        (self.app / '.gitattributes').write_text('scripts/*.sh filter=fixture\n')
+        self.git(self.app, 'add', '.gitattributes')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'attribute fixture')
+        marker = self.root / 'filter-executed'
+        command = shlex.join([sys.executable, '-c', 'import pathlib,sys;pathlib.Path('
+                              + repr(str(marker)) + ').touch();sys.stdout.write(sys.stdin.read())'])
+        configuration = self.root / 'filter.config'
+        self.git(self.app, 'config', '--file', str(configuration), 'filter.fixture.clean', command)
+        self.git(self.app, 'config', 'include.path', str(configuration))
+        os.utime(self.app / 'scripts/check.sh', (1, 1))
+        with self.assertRaisesRegex(ValueError, 'filters'):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_replacement_objects_cannot_change_the_pinned_template(self):
+        (self.template / 'AGENTS.md').write_text('unreviewed replacement instructions\n')
+        self.git(self.template, 'add', 'AGENTS.md')
+        self.git(self.template, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'replacement fixture')
+        self.git(self.template, 'replace', bootstrap.TEMPLATE_PIN, 'HEAD')
+        bootstrap.prepare(self.app, self.template, True)
+        self.assertEqual((self.app / 'AGENTS.md').read_text(), 'fixture for AGENTS.md\n')
+
+    def test_ambient_git_environment_cannot_redirect_the_target(self):
+        with patch.dict(os.environ, {'GIT_DIR': str(self.template / '.git'), 'GIT_WORK_TREE': str(self.template)}):
+            paths = bootstrap.prepare(self.app, self.template)
+        self.assertIn('AGENTS.md', paths)
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_submodule_index_requires_manual_integration(self):
+        head = self.git(self.app, 'rev-parse', 'HEAD').decode().strip()
+        self.git(self.app, 'update-index', '--add', '--cacheinfo', '160000,' + head + ',vendor/module')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'gitlink fixture')
+        with self.assertRaisesRegex(ValueError, 'Submodules'):
             bootstrap.prepare(self.app, self.template, True)
         self.assertFalse((self.app / 'AGENTS.md').exists())

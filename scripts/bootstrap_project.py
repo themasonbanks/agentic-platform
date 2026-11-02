@@ -1,21 +1,44 @@
 """Prepare a reviewed harness change in a clean existing application checkout."""
 import argparse
+import os
 from pathlib import Path
 import subprocess
+import tempfile
 
 TEMPLATE_PIN = '2d26fa1817ec20dd67690bd7853917a4483e8c37'
-PLATFORM_PIN = '329f8d071e027cbd2b85bca6473fd9705710daa0'
+PLATFORM_PIN = '3f910d6dcfa3cde52b62912c4155bf5dd62ef40b'
 
 
-def git(root, *arguments):
-    return subprocess.check_output(['git', '-c', 'core.fsmonitor=false', '-C', str(root), *arguments], stderr=subprocess.DEVNULL).decode()
+def git(root, *arguments, no_match=False):
+    with tempfile.TemporaryDirectory(prefix='bootstrap-git-') as temporary:
+        environment = {'PATH': os.defpath, 'HOME': temporary, 'GIT_CONFIG_GLOBAL': os.devnull,
+                       'GIT_CONFIG_NOSYSTEM': '1', 'GIT_NO_REPLACE_OBJECTS': '1',
+                       'GIT_NO_LAZY_FETCH': '1', 'GIT_OPTIONAL_LOCKS': '0', 'GIT_TERMINAL_PROMPT': '0'}
+        result = subprocess.run(['git', '--no-pager', '-c', 'core.fsmonitor=false',
+                                 '-c', 'core.hooksPath=' + os.devnull, '-c', 'protocol.allow=never',
+                                 '-C', str(root), *arguments], env=environment,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10, check=False)
+        if no_match and result.returncode == 1:
+            return ''
+        result.check_returncode()
+        return result.stdout.decode()
+
+
+def check_configuration(root):
+    if git(root, 'config', '--includes', '--get-regexp',
+           r'^(filter\.|remote\..*\.promisor$|extensions\.partialclone$)', no_match=True):
+        raise ValueError('Configured filters or partial clones require manual integration')
 
 
 def prepare(target, template, write=False):
     target, template = Path(target).resolve(strict=True), Path(template).resolve(strict=True)
     if Path(git(target, 'rev-parse', '--show-toplevel').strip()).resolve() != target:
         raise ValueError('Target must be the repository root')
-    if git(target, 'status', '--porcelain', '--untracked-files=all').strip():
+    for root in (target, template):
+        check_configuration(root)
+    if any(entry.startswith('160000 ') for entry in git(target, 'ls-files', '--stage', '-z').split('\0')):
+        raise ValueError('Submodules require manual integration')
+    if git(target, 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=all').strip():
         raise ValueError('Target must have no existing changes')
     if (target / 'scripts').is_symlink():
         raise ValueError('Symlink scripts directory is forbidden')
@@ -26,7 +49,7 @@ def prepare(target, template, write=False):
         file = target / path
         if not file.is_file() or file.is_symlink() or not file.read_text().strip():
             raise ValueError('Configure real setup/check scripts before adoption')
-    files = {name: git(template, 'show', TEMPLATE_PIN + ':' + name)
+    files = {name: git(template, 'cat-file', 'blob', TEMPLATE_PIN + ':' + name)
              for name in ('AGENTS.md', '.coderabbit.yaml', 'scripts/run_ci.py', 'docs/architecture.md', 'docs/definition-of-done.md', '.github/pull_request_template.md')}
     files['.github/workflows/agentic-ci.yml'] = '''name: Agentic CI
 on:
@@ -90,5 +113,5 @@ if __name__ == '__main__':
     try:
         for name in prepare(args.target, args.template_checkout, args.write):
             print(('prepared ' if args.write else 'would prepare ') + name)
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
         parser.exit(1, 'Preflight failed: ' + str(error) + '\n')
