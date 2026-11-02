@@ -36,19 +36,22 @@ class ProcessWorker:
             raise ValueError('Worker request exceeds bound')
         return self.run_bytes(payload, seconds, keep_going)
 
-    def run_bytes(self, payload, seconds, keep_going):
+    def run_bytes(self, payload, seconds, keep_going, *, output_limit=262144):
         """Send bounded binary input to a trusted command with the same process controls."""
         if not isinstance(payload, bytes) or len(payload) > 20 * 1024 * 1024:
             raise ValueError('Bounded binary worker input required')
         if type(seconds) not in (int, float) or not 0 < seconds <= 300 or not callable(keep_going):
             raise ValueError('Bounded positive runtime and controller guard required')
+        if type(output_limit) is not int or not 1 <= output_limit <= 1024 * 1024:
+            raise ValueError('Bounded trusted-command output limit required')
         deadline = time.monotonic() + seconds
         if not keep_going():
             raise ProcessStopped('Execution disabled before start')
         with tempfile.TemporaryDirectory(prefix='worker-state-') as temporary:
             environment = {'PATH': os.defpath, 'HOME': temporary, 'TMPDIR': temporary,
                            'LANG': 'C.UTF-8', 'GIT_CONFIG_GLOBAL': os.devnull,
-                           'GIT_CONFIG_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0'}
+                           'GIT_CONFIG_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0',
+                           'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_NO_LAZY_FETCH': '1', 'GIT_OPTIONAL_LOCKS': '0'}
             with tempfile.TemporaryFile() as incoming, selectors.DefaultSelector() as selector:
                 incoming.write(payload)
                 incoming.seek(0)
@@ -72,7 +75,7 @@ class ProcessWorker:
                                 selector.unregister(key.fileobj)
                                 continue
                             total += len(chunk)
-                            if total > 262144:
+                            if total > output_limit:
                                 raise ProcessStopped('Worker output exceeds bound')
                             if key.fileobj is process.stdout:
                                 output.extend(chunk)

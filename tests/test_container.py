@@ -10,6 +10,7 @@ import time
 import unittest
 import uuid
 from remediation.container import ContainerWorker
+from remediation.git_snapshot import GitContainerWorker
 from remediation.process import ProcessStopped
 
 IMAGE = 'busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec'
@@ -76,6 +77,34 @@ class ContainerWorkerTests(unittest.TestCase):
     def assert_removed(self, worker):
         output = subprocess.check_output(['docker', 'ps', '-aq', '--filter=name=^/' + worker.last_container + '$'], timeout=10)
         self.assertEqual(output.strip(), b'')
+
+    def test_git_commit_is_the_container_source_despite_dirty_and_ignored_host_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {'PATH': os.defpath, 'HOME': directory, 'TMPDIR': directory,
+                           'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+            def git(*arguments):
+                return subprocess.check_output(['git', '-c', 'core.hooksPath=' + os.devnull, '-C', directory,
+                                                *arguments], env=environment, stderr=subprocess.DEVNULL, timeout=10)
+            git('init', '-q')
+            (root / 'src').mkdir()
+            (root / 'src/example.txt').write_bytes(b'committed fixture\n')
+            (root / '.gitignore').write_text('.env.local\n')
+            git('add', '.')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture')
+            head = git('rev-parse', 'HEAD').decode().strip()
+            (root / 'src/example.txt').write_bytes(b'uncommitted private fixture\n')
+            (root / '.env.local').write_text('ignored private fixture')
+            worker = GitContainerWorker(root, 'fixture/app', head, shutil.which('docker'), IMAGE,
+                                         ('/bin/sh', '-ec', 'test ! -e .git; test ! -e .env.local; '
+                                          'cat src/example.txt; cat'))
+            self.workers.append(worker)
+            result = worker.run({'repository': 'fixture/app', 'head_sha': head}, 20, lambda: True)
+            self.assertTrue(result.output.startswith(b'committed fixture\n'))
+            self.assertNotIn(b'private fixture', result.output)
+            self.assertEqual((root / 'src/example.txt').read_bytes(), b'uncommitted private fixture\n')
+            self.assert_removed(worker)
 
     def test_mutable_source_workspace_without_host_credentials_or_root_control(self):
         worker = self.worker('test "$(id -u)" = 65534; '
