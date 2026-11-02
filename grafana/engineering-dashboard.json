@@ -202,8 +202,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Issue-to-merge p50",
-      "description": "Verified issue creation to first associated merged PR; incomplete mappings excluded and reported separately. Producer contract only; live ingestion must be verified.",
+      "title": "Issue-to-merge p50 (partial)",
+      "description": "Observed mapped issue creation to first associated merged PR. Missing/invalid timing is excluded and reported separately. Late corrections require metric-baseline reconciliation; historical delivery completeness is not assumed.",
       "gridPos": {
         "x": 0,
         "y": 5,

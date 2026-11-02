@@ -130,3 +130,7 @@ Initialize the writer's additive quarantine schema before deploying a worker upg
 The metric application now validates a concrete, nonempty, bounded repository collection when created, using the same helper as projection. Bare strings/bytes, generators, malformed values and over-limit collections fail before startup/database access, rather than returning503 forever. The scope is snapshotted against later caller mutation.
 
 Five additional tests plus updated transport/worker fixtures cover accepted warnings without resend, rejected events followed by newer successful events, durable fenced quarantine, non-retryable HTTP/size failures without resend, eager scope rejection and operator quarantine status. All62 local tests passed. These changes address the verified CodeRabbit findings before integration; no production exporter or account configuration was changed. Protocol semantics verified against https://opentelemetry.io/docs/specs/otlp/#partial-success-1 .
+
+## Observed lead-time metrics
+
+The additive source timing fields and receipt-ordered issue/merge histogram are documented in [lead-time.md](lead-time.md). Missing timing stays explicit; retroactive first-merge corrections require operator reconciliation and a new metric baseline. The disposable producer fixture now exercises this path, but no live source mapping or Cloud collection is enabled.

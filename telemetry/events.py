@@ -8,7 +8,8 @@ import time
 SOURCES = {'agent', 'ci', 'github', 'linear'}
 KINDS = {'queued', 'running', 'success', 'failure', 'opened', 'merged', 'closed',
          'backlog', 'todo', 'in_progress', 'done', 'cancelled', 'skipped', 'neutral', 'unknown', 'reviewed'}
-NUMBERS = {'pr', 'duration_ms', 'retry_count', 'input_tokens', 'output_tokens', 'cost_microusd', 'review_id'}
+NUMBERS = {'pr', 'duration_ms', 'retry_count', 'input_tokens', 'output_tokens', 'cost_microusd', 'review_id',
+           'issue_created_ns', 'merged_ns'}
 IDENTIFIERS = {'run_id', 'sha', 'model', 'review_state', 'review_classification'}
 
 
@@ -60,6 +61,14 @@ class EventStore:
                     or attributes['review_classification'] not in (
                         {'decision'} if attributes['review_state'] != 'commented' else {'inline', 'unclassified'})):
                 raise ValueError('Explicit review identity, state and evidence classification required')
+        if 'issue_created_ns' in attributes and (source != 'linear'
+                or kind not in {'backlog', 'todo', 'in_progress', 'done', 'cancelled'}
+                or type(attributes['issue_created_ns']) is not int or attributes['issue_created_ns'] > observed_ns):
+            raise ValueError('Issue creation time must come from a consistent Linear record')
+        if 'merged_ns' in attributes and (source != 'github' or kind != 'merged'
+                or not attributes.get('pr') or type(attributes['merged_ns']) is not int
+                or attributes['merged_ns'] > observed_ns):
+            raise ValueError('Merge time must come from a consistent GitHub merge record')
         trace_id = hashlib.sha256((repository + '\0' + issue).encode()).hexdigest()[:32]
         span_id = hashlib.sha256((source + '\0' + event_id).encode()).hexdigest()[:16]
         payload = {'source': source, 'event_id': event_id, 'repository': repository,

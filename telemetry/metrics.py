@@ -3,6 +3,7 @@ from collections import Counter
 import json
 import re
 import time
+from telemetry.leadtime import lead_time_metrics
 
 
 def repository_scope(repositories):
@@ -30,8 +31,10 @@ def render_metrics(db, repositories, max_events=100000, now_ns=None):
     source_counts, ci_counts, tokens = Counter(), Counter(), Counter()
     review_counts, review_unknown = Counter(), Counter()
     attempts, reviews, receipts, highwater = {}, {}, {}, {}
+    lead_time_records = []
     for raw, sequence, received_ns in rows:
         event = json.loads(raw)
+        lead_time_records.append((event, sequence))
         repo, source, attrs = event['repository'], event['source'], event['attributes']
         source_counts[repo, source] += 1
         if sequence is not None:
@@ -104,4 +107,5 @@ def render_metrics(db, repositories, max_events=100000, now_ns=None):
         lines.extend((f'# HELP {name} {help_text}', f'# TYPE {name} gauge'))
         for (repo, source), value in sorted(values.items()):
             lines.append(f'{name}{{repository={json.dumps(repo)},source={json.dumps(source)}}} {value:.9g}')
+    lines.extend(lead_time_metrics(lead_time_records, now_ns))
     return '\n'.join(lines) + '\n'
