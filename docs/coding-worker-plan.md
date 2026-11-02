@@ -6,6 +6,8 @@ Use a dedicated approved automation identity and a scoped secret reference. Neve
 
 ## Proposed execution boundary
 
+The owner approved £5 per calendar month for automated coding-model calls on 2 November 2026, separately from cloud development costs. The current ledger counts micro-USD, so enabling it requires a trusted conservative conversion that includes applicable fees and rounds the available allowance down. Do not configure £5 as $5, infer a current exchange rate or let repository input choose conversion/pricing. Missing or expired conversion evidence must block paid execution. The approved amount does not enable the worker or replace the identity, model, token/runtime and dry-run gates below.
+
 1. Trusted webhook intake authenticates delivery, refetches current review metadata, commits durable work and produces only references.
 2. Trusted coordinator verifies current configuration-bound owner enablement, exact PR head, concurrency/attempt limits and a durable worst-case cost reservation. Unknown price or missing identity/budget blocks execution.
 3. A disposable hosted worker fetches the exact approved head. No GitHub App private key, webhook secret, admin credentials or personal account tokens enter the coding environment. A reviewed model proxy supplies scoped inference access outside untrusted repository processes.
