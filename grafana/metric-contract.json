@@ -1,0 +1,92 @@
+[
+  {
+    "panel": "Run success (%)",
+    "query": "100 * sum(increase(agentic_runs_total{repository=~\"${repository}\",outcome=\"success\"}[$__range])) / sum(increase(agentic_runs_total{repository=~\"${repository}\",outcome=~\"success|failure\"}[$__range]))",
+    "unit": "percent",
+    "definition": "Completed successful runs / completed success-or-failure runs; queued/cancelled runs excluded. Uses completions within the selected dashboard time range."
+  },
+  {
+    "panel": "CI first-pass success (%)",
+    "query": "100 * sum(increase(agentic_ci_attempts_total{repository=~\"${repository}\",attempt=\"1\",outcome=\"success\"}[$__range])) / sum(increase(agentic_ci_attempts_total{repository=~\"${repository}\",attempt=\"1\",outcome=~\"success|failure\"}[$__range]))",
+    "unit": "percent",
+    "definition": "First completed attempt per workflow run; skipped/neutral/cancelled excluded, missing denominator unknown."
+  },
+  {
+    "panel": "Review cycles (partial)",
+    "query": "sum(increase(agentic_review_cycles_total{repository=~\"${repository}\"}[$__range]))",
+    "unit": "short",
+    "definition": "Observed confirmed review submissions: approvals, change requests, or authenticated linked inline comments. Body-only and ambiguous submissions remain unclassified; consult agentic_review_unclassified_total. Delivery completeness and historical reconciliation remain unverified."
+  },
+  {
+    "panel": "Issue-to-merge p50",
+    "query": "histogram_quantile(0.5,sum by(le)(increase(agentic_issue_to_merge_seconds_bucket{repository=~\"${repository}\"}[$__range])))",
+    "unit": "s",
+    "definition": "Verified issue creation to first associated merged PR; incomplete mappings excluded and reported separately. Uses completions within the selected dashboard time range."
+  },
+  {
+    "panel": "Input tokens",
+    "query": "sum(increase(agentic_tokens_total{repository=~\"${repository}\",type=\"input\"}[$__range]))",
+    "unit": "short",
+    "definition": "Reported tokens only; cached-input breakdown must not be charged twice."
+  },
+  {
+    "panel": "Output tokens",
+    "query": "sum(increase(agentic_tokens_total{repository=~\"${repository}\",type=\"output\"}[$__range]))",
+    "unit": "short",
+    "definition": "Reported tokens only; absent model usage is unknown."
+  },
+  {
+    "panel": "Recorded agent cost (partial)",
+    "query": "sum(increase(agentic_cost_usd_total{repository=~\"${repository}\"}[$__range]))",
+    "unit": "currencyUSD",
+    "definition": "Reconciled actual charges only; partial where unknown-cost runs exist. No estimated price substitution."
+  },
+  {
+    "panel": "Runs with unknown cost",
+    "query": "sum(increase(agentic_cost_unknown_runs_total{repository=~\"${repository}\"}[$__range]))",
+    "unit": "short",
+    "definition": "Runs lacking reconciled actual cost; zero is meaningful only when the producer explicitly reports complete coverage."
+  },
+  {
+    "panel": "Human interventions",
+    "query": "sum(increase(agentic_human_interventions_total{repository=~\"${repository}\"}[$__range]))",
+    "unit": "short",
+    "definition": "Distinct explicit needs-human incidents, deduplicated across retries."
+  },
+  {
+    "panel": "Escaped defects",
+    "query": "sum(increase(agentic_escaped_defects_total{repository=~\"${repository}\"}[$__range]))",
+    "unit": "short",
+    "definition": "Owner-confirmed post-release defects linked to deployment; no automatic inference from every Sentry event."
+  },
+  {
+    "panel": "AWS spend (partial)",
+    "query": "sum(agentic_aws_month_cost_usd{repository=~\"${repository}\"})",
+    "unit": "currencyUSD",
+    "definition": "Billing-source actual month-to-date value; delayed and potentially incomplete until invoice reconciliation. Cross-repository total is partial when any selected source is missing."
+  },
+  {
+    "panel": "Telemetry spend (partial)",
+    "query": "sum(agentic_telemetry_month_cost_usd{repository=~\"${repository}\"})",
+    "unit": "currencyUSD",
+    "definition": "Provider-reported usage charges, not an estimate from span counts. Cross-repository total is partial when any selected source is missing."
+  },
+  {
+    "panel": "Oldest pending remediation",
+    "query": "max(agentic_remediation_pending_age_seconds{repository=~\"${repository}\"})",
+    "unit": "s",
+    "definition": "Age of oldest actionable pending run, excluding intentionally disabled work; unavailable producer is unknown."
+  },
+  {
+    "panel": "Deployment failures",
+    "query": "sum(increase(agentic_deployments_total{repository=~\"${repository}\",outcome=\"failure\"}[$__range]))",
+    "unit": "short",
+    "definition": "Terminal failed deployments, unique by deployment ID/environment."
+  },
+  {
+    "panel": "Source delivery lag",
+    "query": "max(agentic_source_lag_seconds{repository=~\"${repository}\"})",
+    "unit": "s",
+    "definition": "Latest durable receipt minus source timestamp, maximum across observed repository/source measurements. Invalid timing is omitted; inspect agentic_source_timing_valid and agentic_source_receipt_age_seconds separately. A quick last delivery does not prove a quiet source is fresh or complete."
+  }
+]
