@@ -102,6 +102,7 @@ class ContainerWorkerTests(unittest.TestCase):
         self.assertEqual(host['PidsLimit'], 64)
         self.assertEqual(host['NanoCpus'], 1_000_000_000)
         self.assertEqual(host['NetworkMode'], 'none')
+        self.assertEqual(host['PidMode'], '')
         self.assertTrue(host['ReadonlyRootfs'])
         self.assertFalse(host['Privileged'])
         self.assertFalse(host['Binds'])
@@ -109,10 +110,19 @@ class ContainerWorkerTests(unittest.TestCase):
         self.assert_removed(worker)
 
     def test_deadline_and_detached_children_are_removed_with_the_container(self):
-        worker = self.worker('setsid /bin/sh -c "sleep 30" >/dev/null 2>&1 & sleep 30')
+        worker = self.worker('touch /workspace/started; setsid /bin/sh -c "sleep 30" >/dev/null 2>&1 & sleep 30')
         started = time.monotonic()
+        ready = []
+        def observe():
+            if worker.last_container and not ready:
+                probe = subprocess.run(['docker', 'exec', '--user=65534:65534', worker.last_container,
+                                        '/bin/test', '-f', '/workspace/started'], capture_output=True, timeout=2)
+                if probe.returncode == 0:
+                    ready.append(True)
+            return True
         with self.assertRaises(ProcessStopped):
-            worker.run({}, 4, lambda: True)
+            worker.run({}, 6, observe)
+        self.assertTrue(ready, 'deadline test must reach the workload before it stops')
         self.assertLess(time.monotonic() - started, 12)
         self.assert_removed(worker)
 

@@ -94,7 +94,7 @@ class ContainerWorker:
                         '--user=65533:65533', '--cap-drop=ALL', '--security-opt=no-new-privileges:true',
                         '--pids-limit=64', '--memory=512m', '--memory-swap=512m', '--cpus=1',
                         '--log-driver=none', '--restart=no', '--no-healthcheck', '--ipc=private',
-                        '--pid=private', '--cgroupns=private',
+                        '--pid=', '--cgroupns=private',
                         '--tmpfs=/workspace:rw,exec,nosuid,nodev,size=256m,uid=65534,gid=65534,mode=0700',
                         '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=64m', '--env=HOME=/workspace',
                         '--env=PATH=/usr/local/bin:/usr/bin:/bin', '--env=TMPDIR=/tmp',
