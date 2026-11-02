@@ -1,0 +1,12 @@
+{
+  "repositories": [],
+  "window_seconds": null,
+  "hold_seconds": null,
+  "pending_seconds": null,
+  "ci_failure_fraction": null,
+  "ci_minimum_attempts": null,
+  "token_limit": null,
+  "recorded_cost_usd_limit": null,
+  "deployment_failure_limit": null,
+  "source_lag_seconds": null
+}
