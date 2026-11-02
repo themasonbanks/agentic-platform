@@ -1,0 +1,7 @@
+bucket               = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
+key                  = "REPLACE_WITH_STATE_PREFIX/production/terraform.tfstate"
+workspace_key_prefix = "REPLACE_WITH_STATE_PREFIX/production/workspaces"
+region               = "eu-west-2"
+encrypt              = true
+use_lockfile         = true
+kms_key_id           = "REPLACE_WITH_STATE_KMS_KEY_ARN"
