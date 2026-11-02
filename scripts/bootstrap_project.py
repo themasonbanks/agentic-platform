@@ -9,7 +9,19 @@ TEMPLATE_PIN = '2d26fa1817ec20dd67690bd7853917a4483e8c37'
 PLATFORM_PIN = '3f910d6dcfa3cde52b62912c4155bf5dd62ef40b'
 
 
+def has_non_placeholder_command(text):
+    """Reject bodies containing only comments and common no-op shell commands."""
+    no_ops = {'', ':', 'true', 'exit 0', 'set -e', 'set -u', 'set -eu', 'set -ue',
+              'set -o pipefail', 'set -euo pipefail', 'set -euxo pipefail'}
+    for line in text.splitlines():
+        for command in line.split('#', 1)[0].split(';'):
+            if ' '.join(command.split()) not in no_ops:
+                return True
+    return False
+
+
 def git(root, *arguments, no_match=False):
+    """Run a bounded Git read with hooks and ambient configuration disabled."""
     with tempfile.TemporaryDirectory(prefix='bootstrap-git-') as temporary:
         environment = {'PATH': os.defpath, 'HOME': temporary, 'GIT_CONFIG_GLOBAL': os.devnull,
                        'GIT_CONFIG_NOSYSTEM': '1', 'GIT_NO_REPLACE_OBJECTS': '1',
@@ -25,12 +37,14 @@ def git(root, *arguments, no_match=False):
 
 
 def check_configuration(root):
+    """Reject configured filters and partial clones before inspecting worktrees."""
     if git(root, 'config', '--includes', '--get-regexp',
            r'^(filter\.|remote\..*\.promisor$|extensions\.partialclone$)', no_match=True):
         raise ValueError('Configured filters or partial clones require manual integration')
 
 
 def prepare(target, template, write=False):
+    """Validate a clean target and optionally create pinned harness files exclusively."""
     target, template = Path(target).resolve(strict=True), Path(template).resolve(strict=True)
     if Path(git(target, 'rev-parse', '--show-toplevel').strip()).resolve() != target:
         raise ValueError('Target must be the repository root')
@@ -47,7 +61,9 @@ def prepare(target, template, write=False):
         raise ValueError('Existing workflows need manual integration to avoid duplicate checks')
     for path in ('scripts/setup.sh', 'scripts/check.sh'):
         file = target / path
-        if not file.is_file() or file.is_symlink() or not file.read_text().strip():
+        if git(target, 'ls-files', '-z', '--', path) != path + '\0':
+            raise ValueError('Commit setup/check scripts before adoption')
+        if not file.is_file() or file.is_symlink() or not has_non_placeholder_command(file.read_text()):
             raise ValueError('Configure real setup/check scripts before adoption')
     files = {name: git(template, 'cat-file', 'blob', TEMPLATE_PIN + ':' + name)
              for name in ('AGENTS.md', '.coderabbit.yaml', 'scripts/run_ci.py', 'docs/architecture.md', 'docs/definition-of-done.md', '.github/pull_request_template.md')}

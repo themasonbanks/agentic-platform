@@ -14,7 +14,7 @@ Use each project's existing package manager and lockfile. Never add pnpm to a Bu
 
 ## Bootstrap a clean existing repository
 
-Prepare real scripts/setup.sh and scripts/check.sh in the application and commit them first. Obtain the reviewed template commit 2d26fa1817ec20dd67690bd7853917a4483e8c37 in a local template checkout. From the platform checkout run:
+Prepare real scripts/setup.sh and scripts/check.sh in the application and commit them first. Preflight requires tracked files and rejects comments-only bodies and common no-op commands. This is a placeholder check, not proof of test coverage or shell correctness; review the adapters and verify actual failing/repaired hosted checks. Obtain the reviewed template commit 2d26fa1817ec20dd67690bd7853917a4483e8c37 in a local template checkout. From the platform checkout run:
 
 ```sh
 python3 scripts/bootstrap_project.py /path/to/app --template-checkout /path/to/template

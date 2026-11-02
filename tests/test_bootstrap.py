@@ -17,14 +17,17 @@ spec.loader.exec_module(bootstrap)
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
+        self.environment = {'PATH': os.defpath, 'HOME': str(self.root), 'TMPDIR': str(self.root),
+                            'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
         self.app, self.template = self.root / 'app', self.root / 'template'
         for repo in (self.app, self.template):
-            subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+            subprocess.run(['git', '-c', 'core.hooksPath=' + os.devnull, 'init', '-q', str(repo)],
+                           check=True, env=self.environment, timeout=10)
         for path in ('scripts/setup.sh', 'scripts/check.sh'):
             file = self.app / path
             file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_text('set -eu\ntrue\n')
+            file.write_text('set -eu\npython3 -m unittest discover -s tests\n')
         for path in ('AGENTS.md', '.coderabbit.yaml', 'scripts/run_ci.py', 'docs/architecture.md',
                      'docs/definition-of-done.md', '.github/pull_request_template.md'):
             file = self.template / path
@@ -42,7 +45,8 @@ class BootstrapTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def git(self, repo, *args):
-        return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL)
+        return subprocess.check_output(['git', '-c', 'core.hooksPath=' + os.devnull, '-C', str(repo), *args],
+                                       stderr=subprocess.DEVNULL, env=self.environment, timeout=10)
 
     def test_preflight_and_generation_preserve_existing_app(self):
         before = self.git(self.app, 'status', '--porcelain')
@@ -53,7 +57,27 @@ class BootstrapTests(unittest.TestCase):
         workflow = (self.app / '.github/workflows/agentic-ci.yml').read_text()
         self.assertIn('@' + bootstrap.PLATFORM_PIN, workflow)
         self.assertIn('github.event_name', workflow)
-        self.assertEqual((self.app / 'scripts/check.sh').read_text(), 'set -eu\ntrue\n')
+        self.assertEqual((self.app / 'scripts/check.sh').read_text(),
+                         'set -eu\npython3 -m unittest discover -s tests\n')
+
+    def test_ignored_untracked_adapter_is_rejected_before_writing(self):
+        self.git(self.app, 'rm', '--cached', 'scripts/check.sh')
+        (self.app / '.gitignore').write_text('scripts/check.sh\n')
+        self.git(self.app, 'add', '.gitignore')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'ignore fixture adapter')
+        with self.assertRaisesRegex(ValueError, 'Commit setup/check'):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_known_placeholder_adapter_is_rejected_before_writing(self):
+        (self.app / 'scripts/check.sh').write_text('#!/bin/sh\n# fixture\nset -eu; true # no check\n:; exit 0\n')
+        self.git(self.app, 'add', '.')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'placeholder fixture')
+        with self.assertRaisesRegex(ValueError, 'real setup/check'):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse((self.app / 'AGENTS.md').exists())
 
     def test_dirty_tree_rejected_without_partial_write(self):
         (self.app / 'unrelated.txt').write_text('existing change')
@@ -119,9 +143,13 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.app / 'AGENTS.md').read_text(), 'fixture for AGENTS.md\n')
 
     def test_ambient_git_environment_cannot_redirect_the_target(self):
-        with patch.dict(os.environ, {'GIT_DIR': str(self.template / '.git'), 'GIT_WORK_TREE': str(self.template)}):
+        foreign_index = self.root / 'foreign-index'
+        with patch.dict(os.environ, {'GIT_DIR': str(self.template / '.git'),
+                                    'GIT_WORK_TREE': str(self.template), 'GIT_INDEX_FILE': str(foreign_index)}):
+            self.assertEqual(self.git(self.app, 'rev-parse', '--show-toplevel').decode().strip(), str(self.app))
             paths = bootstrap.prepare(self.app, self.template)
         self.assertIn('AGENTS.md', paths)
+        self.assertFalse(foreign_index.exists())
         self.assertFalse((self.app / 'AGENTS.md').exists())
 
     def test_submodule_index_requires_manual_integration(self):
