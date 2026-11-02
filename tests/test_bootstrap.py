@@ -79,6 +79,23 @@ class BootstrapTests(unittest.TestCase):
             bootstrap.prepare(self.app, self.template, True)
         self.assertFalse((self.app / 'AGENTS.md').exists())
 
+    def test_hidden_worktree_changes_cannot_conceal_committed_placeholder(self):
+        adapter = self.app / 'scripts/check.sh'
+        adapter.write_text('true\n')
+        self.git(self.app, 'add', '.')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'committed placeholder fixture')
+        for flag in ('assume-unchanged', 'skip-worktree'):
+            with self.subTest(flag=flag):
+                self.git(self.app, 'update-index', '--' + flag, 'scripts/check.sh')
+                adapter.write_text('python3 -m unittest discover -s tests\n')
+                self.assertEqual(self.git(self.app, 'status', '--porcelain'), b'')
+                with self.assertRaisesRegex(ValueError, 'flags'):
+                    bootstrap.prepare(self.app, self.template, True)
+                self.assertFalse((self.app / 'AGENTS.md').exists())
+                self.git(self.app, 'update-index', '--no-' + flag, 'scripts/check.sh')
+                adapter.write_text('true\n')
+
     def test_dirty_tree_rejected_without_partial_write(self):
         (self.app / 'unrelated.txt').write_text('existing change')
         with self.assertRaises(ValueError):

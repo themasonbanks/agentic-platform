@@ -63,7 +63,12 @@ def prepare(target, template, write=False):
         file = target / path
         if git(target, 'ls-files', '-z', '--', path) != path + '\0':
             raise ValueError('Commit setup/check scripts before adoption')
-        if not file.is_file() or file.is_symlink() or not has_non_placeholder_command(file.read_text()):
+        if git(target, 'ls-files', '-v', '-z', '--', path) != 'H ' + path + '\0':
+            raise ValueError('Setup/check scripts cannot use assume-unchanged or skip-worktree flags')
+        committed = git(target, 'cat-file', 'blob', 'HEAD:' + path)
+        if (not file.is_file() or file.is_symlink()
+                or not has_non_placeholder_command(file.read_text())
+                or not has_non_placeholder_command(committed)):
             raise ValueError('Configure real setup/check scripts before adoption')
     files = {name: git(template, 'cat-file', 'blob', TEMPLATE_PIN + ':' + name)
              for name in ('AGENTS.md', '.coderabbit.yaml', 'scripts/run_ci.py', 'docs/architecture.md', 'docs/definition-of-done.md', '.github/pull_request_template.md')}
