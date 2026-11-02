@@ -1,9 +1,16 @@
 """Run a fixed isolation probe only on an explicitly enabled disposable runner."""
 import json
 import os
+from pathlib import Path
+import shutil
 import subprocess
+import sys
+import tempfile
+import time
 import unittest
 import uuid
+from remediation.container import ContainerWorker
+from remediation.process import ProcessStopped
 
 IMAGE = 'busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec'
 
@@ -48,3 +55,127 @@ class ContainerTests(unittest.TestCase):
             subprocess.run(['docker', 'wait', self.name], check=True, capture_output=True, timeout=1)
         subprocess.run(['docker', 'rm', '-f', self.name], check=True, capture_output=True, timeout=20)
         self.assertNotEqual(subprocess.run(['docker', 'inspect', self.name], capture_output=True, timeout=10).returncode, 0)
+
+
+@unittest.skipUnless(os.environ.get('VERIFY_CONTAINER_ISOLATION') == '1', 'requires disposable Docker runner')
+class ContainerWorkerTests(unittest.TestCase):
+    def setUp(self):
+        self.workers = []
+
+    def tearDown(self):
+        for worker in self.workers:
+            if worker.last_container:
+                subprocess.run(['docker', 'rm', '-f', worker.last_container], capture_output=True, timeout=10)
+
+    def worker(self, script):
+        worker = ContainerWorker(shutil.which('docker'), IMAGE, ('/bin/sh', '-ec', script),
+                                 {'src/example.txt': ('100644', b'original fixture\n')})
+        self.workers.append(worker)
+        return worker
+
+    def assert_removed(self, worker):
+        output = subprocess.check_output(['docker', 'ps', '-aq', '--filter=name=^/' + worker.last_container + '$'], timeout=10)
+        self.assertEqual(output.strip(), b'')
+
+    def test_mutable_source_workspace_without_host_credentials_or_root_control(self):
+        worker = self.worker('test "$(id -u)" = 65534; '
+                             'test -z "${WORKER_SECRET_CANARY:-}"; test ! -S /var/run/docker.sock; '
+                             'test -z "$(ip route)"; if nc -w 1 1.1.1.1 443 </dev/null; then exit 1; fi; '
+                             'if touch /outside 2>/dev/null; then exit 1; fi; '
+                             'if kill -STOP 1 2>/dev/null; then exit 1; fi; '
+                             'test "$(cat src/example.txt)" = "original fixture"; '
+                             'printf "changed fixture\\n" >src/example.txt; cat src/example.txt; cat')
+        configurations = []
+        def observe():
+            if worker.last_container and not configurations:
+                probe = subprocess.run(['docker', 'inspect', worker.last_container], capture_output=True, timeout=2)
+                if probe.returncode == 0:
+                    configurations.append(json.loads(probe.stdout)[0])
+            return True
+        result = worker.run({'reference': 'fixture-only'}, 15, observe)
+        self.assertTrue(result.output.startswith(b'changed fixture\n'))
+        self.assertIn(b'"reference": "fixture-only"', result.output)
+        self.assertEqual(len(configurations), 1)
+        host = configurations[0]['HostConfig']
+        self.assertEqual(host['Memory'], 512 * 1024 * 1024)
+        self.assertEqual(host['MemorySwap'], host['Memory'])
+        self.assertEqual(host['PidsLimit'], 64)
+        self.assertEqual(host['NanoCpus'], 1_000_000_000)
+        self.assertEqual(host['NetworkMode'], 'none')
+        self.assertTrue(host['ReadonlyRootfs'])
+        self.assertFalse(host['Privileged'])
+        self.assertFalse(host['Binds'])
+        self.assertEqual(configurations[0]['Config']['User'], '65533:65533')
+        self.assert_removed(worker)
+
+    def test_deadline_and_detached_children_are_removed_with_the_container(self):
+        worker = self.worker('setsid /bin/sh -c "sleep 30" >/dev/null 2>&1 & sleep 30')
+        started = time.monotonic()
+        with self.assertRaises(ProcessStopped):
+            worker.run({}, 4, lambda: True)
+        self.assertLess(time.monotonic() - started, 12)
+        self.assert_removed(worker)
+
+    def test_output_flood_and_revocation_remove_the_container(self):
+        worker = self.worker('head -c 300000 /dev/zero')
+        with self.assertRaisesRegex(ProcessStopped, 'output'):
+            worker.run({}, 15, lambda: True)
+        self.assert_removed(worker)
+        worker = self.worker('sleep 30')
+        started = time.monotonic()
+        with self.assertRaises(ProcessStopped):
+            worker.run({}, 15, lambda: time.monotonic() - started < 3)
+        self.assert_removed(worker)
+
+    def test_watchdog_stops_container_after_controller_is_killed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / 'container-name'
+            program = ('import pathlib,threading,time\n'
+                       'from remediation.container import ContainerWorker\n'
+                       'worker=ContainerWorker(' + repr(shutil.which('docker')) + ',' + repr(IMAGE)
+                       + ',("/bin/sh","-ec","touch /workspace/started; exec sleep 30"),'
+                       '{"src/file":("100644",b"fixture")})\n'
+                       'def record():\n'
+                       ' while worker.last_container is None: time.sleep(.01)\n'
+                       ' pathlib.Path(' + repr(str(marker)) + ').write_text(worker.last_container)\n'
+                       'threading.Thread(target=record,daemon=True).start()\n'
+                       'worker.run({},8,lambda:True)\n')
+            environment = dict(os.environ, TMPDIR=directory)
+            child = subprocess.Popen([sys.executable, '-c', program], env=environment,
+                                     cwd=Path(__file__).resolve().parents[1],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            name = None
+            try:
+                until = time.monotonic() + 6
+                while not marker.exists() and time.monotonic() < until:
+                    time.sleep(.05)
+                self.assertTrue(marker.exists(), 'controller did not initialize')
+                name = marker.read_text()
+                started = False
+                while time.monotonic() < until:
+                    probe = subprocess.run(['docker', 'exec', '--user=65534:65534', name,
+                                            '/bin/test', '-f', '/workspace/started'],
+                                           capture_output=True, timeout=2)
+                    if probe.returncode == 0:
+                        started = True
+                        break
+                    time.sleep(.1)
+                self.assertTrue(started, 'container command did not start')
+                child.kill()
+                child.wait(timeout=3)
+                until = time.monotonic() + 10
+                state = b'true'
+                while state == b'true' and time.monotonic() < until:
+                    state = subprocess.check_output(['docker', 'inspect', '-f', '{{.State.Running}}', name],
+                                                    timeout=2).strip()
+                    if state == b'true':
+                        time.sleep(.1)
+                self.assertEqual(state, b'false')
+                code = subprocess.check_output(['docker', 'inspect', '-f', '{{.State.ExitCode}}', name], timeout=2)
+                self.assertEqual(code.strip(), b'0')
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=3)
+                if name:
+                    subprocess.run(['docker', 'rm', '-f', name], capture_output=True, timeout=10)

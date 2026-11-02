@@ -1,5 +1,6 @@
 """Verify real process-group termination using harmless local child programs."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -64,6 +65,14 @@ class ProcessTests(unittest.TestCase):
     def test_output_flood_is_bounded(self):
         with self.assertRaisesRegex(ProcessStopped, 'output'):
             self.worker('import os;os.write(1,b"x"*300000);os.write(2,b"y"*300000)').run({}, 3, lambda: True)
+
+    def test_binary_input_is_bounded_and_not_reencoded_as_json(self):
+        payload = bytes(range(256)) * 4096
+        worker = self.worker('import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')
+        result = worker.run_bytes(payload, 3, lambda: True)
+        self.assertEqual(result.output.strip().decode(), hashlib.sha256(payload).hexdigest())
+        with self.assertRaises(ValueError):
+            worker.run_bytes(b'x' * (20 * 1024 * 1024 + 1), 3, lambda: True)
 
     def test_revocation_stops_running_process(self):
         calls = []

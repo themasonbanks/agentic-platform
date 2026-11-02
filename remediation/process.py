@@ -31,11 +31,17 @@ class ProcessWorker:
             raise ValueError('Trusted ephemeral workspace required')
 
     def run(self, request, seconds, keep_going):
-        if type(seconds) not in (int, float) or not 0 < seconds <= 300 or not callable(keep_going):
-            raise ValueError('Bounded positive runtime and controller guard required')
         payload = json.dumps(request, sort_keys=True, allow_nan=False).encode()
         if len(payload) > 16384:
             raise ValueError('Worker request exceeds bound')
+        return self.run_bytes(payload, seconds, keep_going)
+
+    def run_bytes(self, payload, seconds, keep_going):
+        """Send bounded binary input to a trusted command with the same process controls."""
+        if not isinstance(payload, bytes) or len(payload) > 20 * 1024 * 1024:
+            raise ValueError('Bounded binary worker input required')
+        if type(seconds) not in (int, float) or not 0 < seconds <= 300 or not callable(keep_going):
+            raise ValueError('Bounded positive runtime and controller guard required')
         deadline = time.monotonic() + seconds
         if not keep_going():
             raise ProcessStopped('Execution disabled before start')
