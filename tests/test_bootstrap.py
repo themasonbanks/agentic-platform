@@ -1,0 +1,179 @@
+"""Exercise adoption preflight against disposable application/template repositories."""
+import importlib.util
+import os
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location('bootstrap', Path(__file__).parents[1] / 'scripts/bootstrap_project.py')
+bootstrap = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bootstrap)
+
+
+class BootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        self.environment = {'PATH': os.defpath, 'HOME': str(self.root), 'TMPDIR': str(self.root),
+                            'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+        self.app, self.template = self.root / 'app', self.root / 'template'
+        for repo in (self.app, self.template):
+            subprocess.run(['git', '-c', 'core.hooksPath=' + os.devnull, 'init', '-q', str(repo)],
+                           check=True, env=self.environment, timeout=10)
+        for path in ('scripts/setup.sh', 'scripts/check.sh'):
+            file = self.app / path
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text('set -eu\npython3 -m unittest discover -s tests\n')
+        for path in ('AGENTS.md', '.coderabbit.yaml', 'scripts/run_ci.py', 'docs/architecture.md',
+                     'docs/definition-of-done.md', '.github/pull_request_template.md'):
+            file = self.template / path
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text('fixture for ' + path + '\n')
+        for repo in (self.app, self.template):
+            self.git(repo, 'add', '.')
+            self.git(repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                     '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture')
+        self.original_pin = bootstrap.TEMPLATE_PIN
+        bootstrap.TEMPLATE_PIN = self.git(self.template, 'rev-parse', 'HEAD').decode().strip()
+
+    def tearDown(self):
+        bootstrap.TEMPLATE_PIN = self.original_pin
+        self.tmp.cleanup()
+
+    def git(self, repo, *args):
+        return subprocess.check_output(['git', '-c', 'core.hooksPath=' + os.devnull, '-C', str(repo), *args],
+                                       stderr=subprocess.DEVNULL, env=self.environment, timeout=10)
+
+    def test_preflight_and_generation_preserve_existing_app(self):
+        before = self.git(self.app, 'status', '--porcelain')
+        paths = bootstrap.prepare(self.app, self.template)
+        self.assertEqual(self.git(self.app, 'status', '--porcelain'), before)
+        bootstrap.prepare(self.app, self.template, True)
+        self.assertTrue(all((self.app / p).is_file() for p in paths))
+        workflow = (self.app / '.github/workflows/agentic-ci.yml').read_text()
+        self.assertIn('@' + bootstrap.PLATFORM_PIN, workflow)
+        self.assertIn('github.event_name', workflow)
+        self.assertEqual((self.app / 'scripts/check.sh').read_text(),
+                         'set -eu\npython3 -m unittest discover -s tests\n')
+
+    def test_ignored_untracked_adapter_is_rejected_before_writing(self):
+        self.git(self.app, 'rm', '--cached', 'scripts/check.sh')
+        (self.app / '.gitignore').write_text('scripts/check.sh\n')
+        self.git(self.app, 'add', '.gitignore')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'ignore fixture adapter')
+        with self.assertRaisesRegex(ValueError, 'Commit setup/check'):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_known_placeholder_adapter_is_rejected_before_writing(self):
+        (self.app / 'scripts/check.sh').write_text('#!/bin/sh\n# fixture\nset -eu; true # no check\n:; exit 0\n')
+        self.git(self.app, 'add', '.')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'placeholder fixture')
+        with self.assertRaisesRegex(ValueError, 'real setup/check'):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_hidden_worktree_changes_cannot_conceal_committed_placeholder(self):
+        adapter = self.app / 'scripts/check.sh'
+        adapter.write_text('true\n')
+        self.git(self.app, 'add', '.')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'committed placeholder fixture')
+        for flag in ('assume-unchanged', 'skip-worktree'):
+            with self.subTest(flag=flag):
+                self.git(self.app, 'update-index', '--' + flag, 'scripts/check.sh')
+                adapter.write_text('python3 -m unittest discover -s tests\n')
+                self.assertEqual(self.git(self.app, 'status', '--porcelain'), b'')
+                with self.assertRaisesRegex(ValueError, 'flags'):
+                    bootstrap.prepare(self.app, self.template, True)
+                self.assertFalse((self.app / 'AGENTS.md').exists())
+                self.git(self.app, 'update-index', '--no-' + flag, 'scripts/check.sh')
+                adapter.write_text('true\n')
+
+    def test_dirty_tree_rejected_without_partial_write(self):
+        (self.app / 'unrelated.txt').write_text('existing change')
+        with self.assertRaises(ValueError):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_ignored_existing_destination_is_not_overwritten(self):
+        self.git(self.app, 'config', 'core.excludesFile', str(self.root / 'ignore'))
+        (self.root / 'ignore').write_text('AGENTS.md\n')
+        (self.app / 'AGENTS.md').write_text('existing rules')
+        with self.assertRaises(ValueError):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertEqual((self.app / 'AGENTS.md').read_text(), 'existing rules')
+        self.assertFalse((self.app / '.coderabbit.yaml').exists())
+
+    def test_symlink_ancestor_and_existing_workflow_require_manual_integration(self):
+        external = self.root / 'outside'
+        external.mkdir()
+        (self.app / '.github').symlink_to(external, target_is_directory=True)
+        self.git(self.app, 'add', '.github')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'link fixture')
+        with self.assertRaises(ValueError):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertEqual(list(external.iterdir()), [])
+
+    def test_existing_workflow_rejected_before_files_are_written(self):
+        file = self.app / '.github/workflows/existing.yml'
+        file.parent.mkdir(parents=True)
+        file.write_text('name: Existing\n')
+        self.git(self.app, 'add', '.')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'workflow fixture')
+        with self.assertRaises(ValueError):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_included_clean_filter_is_rejected_before_execution(self):
+        (self.app / '.gitattributes').write_text('scripts/*.sh filter=fixture\n')
+        self.git(self.app, 'add', '.gitattributes')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'attribute fixture')
+        marker = self.root / 'filter-executed'
+        command = shlex.join([sys.executable, '-c', 'import pathlib,sys;pathlib.Path('
+                              + repr(str(marker)) + ').touch();sys.stdout.write(sys.stdin.read())'])
+        configuration = self.root / 'filter.config'
+        self.git(self.app, 'config', '--file', str(configuration), 'filter.fixture.clean', command)
+        self.git(self.app, 'config', 'include.path', str(configuration))
+        os.utime(self.app / 'scripts/check.sh', (1, 1))
+        with self.assertRaisesRegex(ValueError, 'filters'):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_replacement_objects_cannot_change_the_pinned_template(self):
+        (self.template / 'AGENTS.md').write_text('unreviewed replacement instructions\n')
+        self.git(self.template, 'add', 'AGENTS.md')
+        self.git(self.template, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'replacement fixture')
+        self.git(self.template, 'replace', bootstrap.TEMPLATE_PIN, 'HEAD')
+        bootstrap.prepare(self.app, self.template, True)
+        self.assertEqual((self.app / 'AGENTS.md').read_text(), 'fixture for AGENTS.md\n')
+
+    def test_ambient_git_environment_cannot_redirect_the_target(self):
+        foreign_index = self.root / 'foreign-index'
+        with patch.dict(os.environ, {'GIT_DIR': str(self.template / '.git'),
+                                    'GIT_WORK_TREE': str(self.template), 'GIT_INDEX_FILE': str(foreign_index)}):
+            self.assertEqual(self.git(self.app, 'rev-parse', '--show-toplevel').decode().strip(), str(self.app))
+            paths = bootstrap.prepare(self.app, self.template)
+        self.assertIn('AGENTS.md', paths)
+        self.assertFalse(foreign_index.exists())
+        self.assertFalse((self.app / 'AGENTS.md').exists())
+
+    def test_submodule_index_requires_manual_integration(self):
+        head = self.git(self.app, 'rev-parse', 'HEAD').decode().strip()
+        self.git(self.app, 'update-index', '--add', '--cacheinfo', '160000,' + head + ',vendor/module')
+        self.git(self.app, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'gitlink fixture')
+        with self.assertRaisesRegex(ValueError, 'Submodules'):
+            bootstrap.prepare(self.app, self.template, True)
+        self.assertFalse((self.app / 'AGENTS.md').exists())

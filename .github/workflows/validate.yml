@@ -37,12 +37,16 @@ jobs:
           VERIFY_CONTAINER_ISOLATION: "1"
           WORKER_SECRET_CANARY: host-only-fixture
   terraform:
-    name: Terraform offline checks
+    name: Static hosting offline checks (${{ matrix.root }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        root: [terraform/bootstrap, terraform/modules/static_site, terraform/modules/hosting_environment, terraform/environments/development, terraform/environments/production]
     defaults:
       run:
-        working-directory: terraform/bootstrap
+        working-directory: ${{ matrix.root }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -52,7 +56,18 @@ jobs:
           terraform_version: 1.17.1
       - run: terraform fmt -check -recursive
       - run: terraform init -backend=false -input=false -lockfile=readonly
-      - run: terraform validate
+      - name: Initialize caller-provider validation fixture
+        if: matrix.root == 'terraform/modules/hosting_environment'
+        run: terraform -chdir=tests/validation init -backend=false -input=false -lockfile=readonly
+      - name: Validate configured provider bindings
+        env:
+          TERRAFORM_ROOT: ${{ matrix.root }}
+        run: |
+          if test "$TERRAFORM_ROOT" = terraform/modules/hosting_environment; then
+            terraform -chdir=tests/validation validate
+          else
+            terraform validate
+          fi
       - run: terraform test -no-color
   security:
     uses: ./.github/workflows/security-checks.yml
@@ -86,15 +101,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
-      TERRAFORM: ${{ needs.terraform.result }}
       VALIDATION: ${{ needs.validate.result }}
       SECURITY: ${{ needs.security.result }}
       ISOLATION: ${{ needs.isolation.result }}
+      TERRAFORM: ${{ needs.terraform.result }}
       DASHBOARD: ${{ needs.dashboard.result }}
     steps:
       - run: |
-          test "$TERRAFORM" = success
           test "$VALIDATION" = success
           test "$SECURITY" = success
           test "$ISOLATION" = success
+          test "$TERRAFORM" = success
           test "$DASHBOARD" = success
