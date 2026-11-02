@@ -30,4 +30,5 @@ def receive_issue(store, body, signature, secret, organization, issues, states, 
         raise ValueError('Unmapped state')
     updated = data['updatedAt']
     event_id = hashlib.sha256(('\0'.join((data['id'], updated, data['stateId'], payload['action']))).encode()).hexdigest()
-    return store.append('linear', event_id, repository, identifier, state, timestamp_ns(updated), {})
+    attributes = {'issue_created_ns': timestamp_ns(data['createdAt'])} if data.get('createdAt') else {}
+    return store.append('linear', event_id, repository, identifier, state, timestamp_ns(updated), attributes)

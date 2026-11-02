@@ -51,9 +51,6 @@ def generate(directory):
         counter('agentic_human_interventions_total', repo, 1 if repo.endswith('alpha') else 0)
         counter('agentic_deployments_total', repo, 1 if repo.endswith('alpha') else 0, outcome='failure')
         gauge('agentic_remediation_pending_age_seconds', repo, pending)
-        rates = [1, 2, 4, 4, 4] if repo.endswith('alpha') else [0, 0, 2, 4, 4]
-        for bound, rate in zip(('60', '300', '600', '3600', '+Inf'), rates):
-            counter('agentic_issue_to_merge_seconds_bucket', repo, rate, le=bound)
     counter('agentic_cost_usd_total', 'fixture/alpha', .01)
     counter('agentic_escaped_defects_total', 'fixture/alpha', 0)
     gauge('agentic_aws_month_cost_usd', 'fixture/alpha', .25)
@@ -62,7 +59,7 @@ def generate(directory):
     for name, labels, rate, base in series:
         label_text = ','.join(key + '=' + json.dumps(value) for key, value in sorted(labels.items()))
         for index in range(61):
-            progress = min(index, 20) * 3 if name in {'agentic_runs_total', 'agentic_issue_to_merge_seconds_bucket'} else index
+            progress = min(index, 20) * 3 if name == 'agentic_runs_total' else index
             lines.append(f'{name}{{{label_text}}} {base + rate * progress:.10g} {start + 60 * index}.0')
     projected, producer_report = produce(directory, start, end)
     lines.extend(projected)
@@ -147,12 +144,17 @@ def screenshots(url, start, end, panels, output, report):
                         page.goto(url + '/d/agentic-engineering-draft?' + query, wait_until='networkidle')
                         for panel in panels:
                             page.get_by_text(panel['title'], exact=True).first.scroll_into_view_if_needed(timeout=30000)
-                        for panel_id in (1, 2, 3, 5, 6, 15):
+                        verified_panels = (1, 2, 3, 4, 5, 6, 15)
+                        for panel_id in verified_panels:
                             panel = next(item for item in panels if item['id'] == panel_id)
                             region = page.get_by_role('region', name=panel['title'], exact=True)
                             value = EXPECTED[repo][panel_id - 1]
-                            expect(region).to_contain_text(re.compile(r'(?<![0-9])' + str(value) + r'(?:\.0+)?\s*%?(?![0-9])'), timeout=30000)
-                        report.setdefault('render_checks', []).append({'layout': layout, 'repository': repo, 'panels': [1, 2, 3, 5, 6, 15]})
+                            pattern = (r'(?<![0-9])' + format(value / 60, 'g') + r'(?:\.0+)?\s*mins\b'
+                                       if panel_id == 4 else
+                                       r'(?<![0-9])' + str(value) + r'(?:\.0+)?\s*%?(?![0-9])')
+                            expect(region).to_contain_text(re.compile(pattern), timeout=30000)
+                        report.setdefault('render_checks', []).append({'layout': layout, 'repository': repo,
+                                                                       'panels': list(verified_panels)})
                     finally:
                         for response in responses:
                             try:
