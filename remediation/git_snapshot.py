@@ -9,11 +9,13 @@ from remediation.container import ContainerWorker, snapshot_archive
 from remediation.process import ProcessStopped, ProcessWorker
 
 
-def committed_files(repository, expected_head, seconds, keep_going):
-    """Read raw blobs from an exact current commit without consulting working files."""
+def committed_files(repository, expected_head, seconds, keep_going, *, tree=None):
+    """Read raw blobs from an approved commit or a derived patch tree."""
     if (not isinstance(expected_head, str) or not re.fullmatch('[0-9a-f]{40}', expected_head)
             or type(seconds) not in (int, float) or not 0 < seconds <= 300 or not callable(keep_going)):
         raise ValueError('Exact approved commit, bounded time and fresh guard required')
+    if tree is not None and (not isinstance(tree, str) or not re.fullmatch('[0-9a-f]{40}', tree)):
+        raise ValueError('Exact patch tree required')
     repository = Path(repository).resolve(strict=True)
     binary = shutil.which('git', path=os.defpath)
     if binary is None or not repository.is_dir():
@@ -35,7 +37,9 @@ def committed_files(repository, expected_head, seconds, keep_going):
     if any(name.lower() == 'extensions.partialclone'
            or re.fullmatch(r'remote\..*\.promisor', name.lower()) for name in names):
         raise ValueError('Partial clones require manual integration')
-    entries = git('ls-tree', '-r', '-l', '-z', '--full-tree', expected_head, '--').split(b'\0')
+    if tree is not None and git('cat-file', '-t', tree).strip() != b'tree':
+        raise ValueError('Patch object must be a tree')
+    entries = git('ls-tree', '-r', '-l', '-z', '--full-tree', tree or expected_head, '--').split(b'\0')
     metadata = {}
     total = 0
     for entry in entries:

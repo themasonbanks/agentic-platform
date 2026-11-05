@@ -10,8 +10,10 @@ import time
 import unittest
 import uuid
 from remediation.container import ContainerWorker
+from remediation.checks import check_patch
 from remediation.git_snapshot import GitContainerWorker
 from remediation.process import ProcessStopped
+from remediation.publishing import authorize_publication
 
 IMAGE = 'busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec'
 
@@ -77,6 +79,42 @@ class ContainerWorkerTests(unittest.TestCase):
     def assert_removed(self, worker):
         output = subprocess.check_output(['docker', 'ps', '-aq', '--filter=name=^/' + worker.last_container + '$'], timeout=10)
         self.assertEqual(output.strip(), b'')
+
+    def test_patch_evidence_requires_real_checks_on_fresh_tree_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {'PATH': os.defpath, 'HOME': directory, 'TMPDIR': directory,
+                           'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+
+            def git(*arguments):
+                return subprocess.check_output(['git', '-c', 'core.hooksPath=' + os.devnull,
+                                                '-C', directory, *arguments],
+                                               env=environment, stderr=subprocess.DEVNULL, timeout=10)
+
+            git('init', '-q')
+            (root / 'src').mkdir()
+            source = root / 'src/example.txt'
+            source.write_text('original\n')
+            git('add', '.')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture')
+            head = git('rev-parse', 'HEAD').decode().strip()
+            source.write_text('fixed\n')
+            patch = git('diff', '--no-ext-diff')
+            source.write_text('dirty host bytes\n')
+            checks = {
+                'first': ('/bin/sh', '-ec', 'grep -qx fixed src/example.txt && echo mutated >src/example.txt'),
+                'second': ('/bin/grep', '-qx', 'fixed', 'src/example.txt'),
+            }
+            evidence = check_patch(root, head, patch, {'src'}, checks,
+                                   shutil.which('docker'), IMAGE, 35, lambda: True)
+            self.assertEqual(git('show', evidence.tree_sha + ':src/example.txt'), b'fixed\n')
+            self.assertEqual(authorize_publication(head, head, evidence.tree_sha, evidence, checks)['tree'],
+                             evidence.tree_sha)
+            with self.assertRaises(ProcessStopped):
+                check_patch(root, head, patch, {'src'}, {'failed': ('/bin/false',)},
+                            shutil.which('docker'), IMAGE, 20, lambda: True)
+            self.assertEqual(source.read_text(), 'dirty host bytes\n')
 
     def test_git_commit_is_the_container_source_despite_dirty_and_ignored_host_files(self):
         with tempfile.TemporaryDirectory() as directory:
