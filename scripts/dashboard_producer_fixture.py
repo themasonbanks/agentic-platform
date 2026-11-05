@@ -31,17 +31,25 @@ def produce(directory, start, end):
     secret, token = b'fixture-only-webhook-key-' * 2, 'fixture-only-metrics-token-' * 2
     marker = 'fixture-private-text-must-not-persist'
     clock, evidence, lines = [start], {}, []
+    lead_items = [(repo, index, minute, sample, 1000 + minute * 12 + sample,
+                   'KEB-' + str(10000 + index * 10000 + minute * 12 + sample),
+                   f'lead-{index}-{minute}-{sample}')
+                  for index, repo in enumerate(repositories)
+                  for minute in range(1, 21) for sample in range(12)]
     def connect():
         return sqlite3.connect(database)
     def inline_api(route):
         identity = int(route.split('/')[-2])
         return evidence.get(identity, [])
     app = create_application(connect, secret, dict.fromkeys(repositories, 42),
-                             IssueResolver({(repo, index + 1): 'KEB-' + str(131 + index)
-                                            for index, repo in enumerate(repositories)}, {}),
+                             IssueResolver({**{(repo, index + 1): 'KEB-' + str(131 + index)
+                                               for index, repo in enumerate(repositories)},
+                                            **{(repo, pr): issue for repo, _, _, _, pr, issue, _ in lead_items}}, {}),
                              secret, 'fixture-org',
-                             {'issue-' + str(index): (repo, 'KEB-' + str(131 + index))
-                              for index, repo in enumerate(repositories)}, {'done': 'done'},
+                             {**{'issue-' + str(index): (repo, 'KEB-' + str(131 + index))
+                                 for index, repo in enumerate(repositories)},
+                              **{identity: (repo, issue) for repo, _, _, _, _, issue, identity in lead_items}},
+                             {'done': 'done'},
                              now_ms=lambda: clock[0] * 1000, inline_evidence=InlineReviewEvidence(inline_api))
     metrics = create_metrics_application(connect, token, repositories)
     def invoke(target, environ, expected='200 OK'):
@@ -114,7 +122,25 @@ def produce(directory, start, end):
                 deliver({'organizationId': 'fixture-org', 'webhookTimestamp': clock[0] * 1000,
                          'type': 'Issue', 'action': 'update', 'data': {
                              'id': 'issue-' + str(index), 'stateId': 'done',
+                             'createdAt': stamp(start - 86400),
                              'updatedAt': stamp(observed), 'description': marker}})
+                if 1 <= minute <= 20:
+                    durations = (60, 300, 600, 600) if index == 0 else (600, 600, 3600, 3600)
+                    for sample, duration in enumerate(durations * 3):
+                        pr = 1000 + minute * 12 + sample
+                        identity = f'lead-{index}-{minute}-{sample}'
+                        linear = {'organizationId': 'fixture-org', 'webhookTimestamp': clock[0] * 1000,
+                                  'type': 'Issue', 'action': 'create', 'data': {
+                                      'id': identity, 'stateId': 'done', 'createdAt': stamp(observed - duration),
+                                      'updatedAt': stamp(observed), 'description': marker}}
+                        merged = dict(base, action='closed', pull_request={
+                            'number': pr, 'merged': True, 'state': 'closed', 'head': {'sha': 'a' * 40},
+                            'updated_at': stamp(observed), 'merged_at': stamp(observed), 'body': marker})
+                        deliver(linear)
+                        deliver(merged, 'pull_request')
+                        if sample == 0:
+                            deliver(linear)
+                            deliver(merged, 'pull_request')
             snapshot = scrape()
             assert marker not in snapshot
             lines.extend(line + f' {clock[0]}.0' for line in snapshot.splitlines() if line and not line.startswith('#'))
@@ -133,16 +159,25 @@ def produce(directory, start, end):
             check('agentic_tokens_total', repo, 60 * outputs, type='output')
             check('agentic_review_cycles_total', repo, 1 + 60 * reviews)
             check('agentic_review_unclassified_total', repo, 60)
+            check('agentic_issue_to_merge_seconds_count', repo, 240)
+            check('agentic_issue_to_merge_seconds_sum', repo, 93600 if repo.endswith('alpha') else 504000)
+            for bound in (60, 300, 600, 1800, 3600, 14400, 86400, 604800, 2592000):
+                value = (60 if bound == 60 else 120 if bound == 300 else 240) if repo.endswith('alpha') else (
+                    0 if bound < 600 else 120 if bound < 3600 else 240)
+                check('agentic_issue_to_merge_seconds_bucket', repo, value, le=str(bound))
+            check('agentic_issue_to_merge_seconds_bucket', repo, 240, le='+Inf')
+            for reason in ('missing_issue_creation', 'missing_merge_time', 'invalid_timing', 'legacy_receipt'):
+                check('agentic_issue_to_merge_incomplete', repo, 0, reason=reason)
             for source in ('agent', 'ci', 'github', 'linear'):
                 check('agentic_source_lag_seconds', repo, lag, source=source)
                 check('agentic_source_timing_valid', repo, 1, source=source)
                 check('agentic_source_receipt_age_seconds', repo, 0, source=source)
         with closing(connect()) as db:
             count = db.execute('SELECT count(*) FROM engineering_events').fetchone()[0]
-            assert count == 5350, count
+            assert count == 6310, count
             assert marker not in '\n'.join(db.iterdump())
     assert clock[0] == end
     return lines, {'snapshots': 61, 'events': count, 'verified_final_samples': verified,
                    'negative_auth_checks': 3, 'repositories': list(repositories),
-                   'producer_backed_panels': [2, 3, 5, 6, 15],
-                   'contract_only_panels': [1, 4, 7, 8, 9, 10, 11, 12, 13, 14]}
+                   'producer_backed_panels': [2, 3, 4, 5, 6, 15],
+                   'contract_only_panels': [1, 7, 8, 9, 10, 11, 12, 13, 14]}

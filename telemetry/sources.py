@@ -36,8 +36,11 @@ def pull_request(store, payload, issue, delivery_id):
     if payload['action'] not in {'opened', 'reopened', 'closed'}:
         return False
     kind = 'merged' if pr['merged'] else ('closed' if pr['state'] == 'closed' else 'opened')
+    attributes = {'pr': pr['number'], 'sha': pr['head']['sha']}
+    if kind == 'merged' and pr.get('merged_at'):
+        attributes['merged_ns'] = timestamp_ns(pr['merged_at'])
     return store.append('github', delivery_id, payload['repository']['full_name'], issue, kind,
-                        timestamp_ns(pr['updated_at']), {'pr': pr['number'], 'sha': pr['head']['sha']})
+                        timestamp_ns(pr['updated_at']), attributes)
 
 
 def codex_turn(store, event, event_id, repository, issue, run_id, sha, observed_ns):
