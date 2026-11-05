@@ -23,6 +23,19 @@ jobs:
       - run: python3 -m venv "$RUNNER_TEMP/telemetry-env"
       - run: '"$RUNNER_TEMP/telemetry-env/bin/python" -m pip install -r telemetry/requirements.txt'
       - run: '"$RUNNER_TEMP/telemetry-env/bin/python" -m unittest discover -s tests -v'
+  isolation:
+    name: Container isolation probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - run: docker pull busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+      - run: python3 -m unittest discover -s tests -p test_container.py -v
+        env:
+          VERIFY_CONTAINER_ISOLATION: "1"
+          WORKER_SECRET_CANARY: host-only-fixture
   terraform:
     name: Static hosting offline checks (${{ matrix.root }})
     runs-on: ubuntu-latest
@@ -84,17 +97,19 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [validate, security, terraform, dashboard]
+    needs: [validate, security, isolation, terraform, dashboard]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
       VALIDATION: ${{ needs.validate.result }}
       SECURITY: ${{ needs.security.result }}
+      ISOLATION: ${{ needs.isolation.result }}
       TERRAFORM: ${{ needs.terraform.result }}
       DASHBOARD: ${{ needs.dashboard.result }}
     steps:
       - run: |
           test "$VALIDATION" = success
           test "$SECURITY" = success
+          test "$ISOLATION" = success
           test "$TERRAFORM" = success
           test "$DASHBOARD" = success
