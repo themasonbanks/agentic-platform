@@ -32,8 +32,30 @@ class Budget:
 
     @staticmethod
     def _amount(amount, allow_zero=False):
-        if type(amount) is not int or amount < (0 if allow_zero else 1):
+        if type(amount) is not int or not (0 if allow_zero else 1) <= amount <= 9_223_372_036_854_775_807:
             raise ValueError("Known integer micro-USD costs required")
+
+    def assert_calls_stopped(self, run):
+        """Keep reservations held while any inference dispatch remains unresolved."""
+        exists = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inference_calls'").fetchone()
+        if exists and self.db.execute("SELECT 1 FROM inference_calls WHERE run=? "
+                                      "AND status NOT IN ('complete','cancelled') LIMIT 1", (run,)).fetchone():
+            raise ValueError('Inference calls must be stopped and reconciled before closing the run')
+
+    def _used(self, period):
+        return sum(row[0] for row in self.db.execute(
+            "SELECT CASE WHEN status='settled' THEN actual ELSE reserved END "
+            "FROM spend_reservations WHERE period=?", (period,)))
+
+    def period_safe(self, period, *, additional=0):
+        """Block further execution after overspend or a provider-limit violation."""
+        limit = self.db.execute('SELECT ceiling FROM spend_limits WHERE period=?', (period,)).fetchone()
+        if limit is None or self._used(period) + additional > limit[0]:
+            return False
+        exists = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inference_calls'").fetchone()
+        return not (exists and self.db.execute('''SELECT 1 FROM inference_calls c
+            JOIN spend_reservations b ON b.run=c.run
+            WHERE b.period=? AND c.status='overrun' LIMIT 1''', (period,)).fetchone())
 
     def reserve(self, run, period, worst_case):
         self._period(period)
@@ -48,12 +70,7 @@ class Budget:
             if existing:
                 self.db.rollback()
                 return False
-            limit = self.db.execute("SELECT ceiling FROM spend_limits WHERE period=?", (period,)).fetchone()
-            used = self.db.execute(
-                "SELECT COALESCE(SUM(CASE WHEN status='settled' THEN actual ELSE reserved END),0) "
-                "FROM spend_reservations WHERE period=?", (period,)
-            ).fetchone()[0]
-            if limit is None or used + worst_case > limit[0]:
+            if not self.period_safe(period, additional=worst_case):
                 self.db.rollback()
                 return False
             self.db.execute("INSERT INTO spend_reservations VALUES(?,?,?,NULL,'reserved')", (run, period, worst_case))
@@ -68,6 +85,7 @@ class Budget:
         self._amount(actual, allow_zero=True)
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
+            self.assert_calls_stopped(run)
             row = self.db.execute("SELECT actual,status FROM spend_reservations WHERE run=?", (run,)).fetchone()
             if row is None:
                 raise ValueError("No reservation")

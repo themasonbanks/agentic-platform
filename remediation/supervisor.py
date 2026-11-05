@@ -39,7 +39,8 @@ class Supervisor:
         if request is None:
             return None
         run = uuid.uuid4().hex
-        request.update(run=run, period=current.strftime('%Y-%m'), spend_limit=self.worst_case)
+        request.update(run=run, period=current.strftime('%Y-%m'), spend_limit=self.worst_case,
+                       configuration_digest=self.enablement.fingerprint(self.configuration))
         with self.db:
             self.db.execute('INSERT INTO execution_runs VALUES(?,?,?,\'preparing\',\'\')',
                             (run, request['attempt'], json.dumps(request, sort_keys=True)))
@@ -54,12 +55,17 @@ class Supervisor:
         return dict(request)
 
     def can_continue(self, run):
-        row = self.db.execute('''SELECT r.request,r.status,a.status,a.mode,b.status
+        row = self.db.execute('''SELECT r.request,r.status,a.status,a.mode,b.status,b.period
             FROM execution_runs r JOIN attempts a ON a.id=r.attempt
             JOIN spend_reservations b ON b.run=r.run WHERE r.run=?''', (run,)).fetchone()
-        return (row is not None and row[1] in {'preparing', 'reserved', 'running'} and row[2] == 'running'
+        if row is None:
+            return False
+        request = json.loads(row[0])
+        return (row[1] in {'preparing', 'reserved', 'running'} and row[2] == 'running'
                 and row[3] == 'execution' and row[4] == 'reserved'
-                and self._now() < json.loads(row[0])['deadline']
+                and self._now() < request['deadline']
+                and request.get('configuration_digest') == self.enablement.fingerprint(self.configuration)
+                and request.get('period') == row[5] and self.budget.period_safe(row[5])
                 and self.enablement.enabled(self.configuration))
 
     def execute(self, run, worker):
@@ -74,21 +80,38 @@ class Supervisor:
             return worker.run(request, request['deadline'] - self.clock(), lambda: self.can_continue(run))
         except ProcessStopped:
             with self.db:
-                self.db.execute('''UPDATE execution_runs SET status='needs_human',reason='worker_stopped_cost_unknown'
-                    WHERE run=?''', (run,))
-                self.db.execute('''UPDATE jobs SET status='needs_human',reason='worker_stopped_cost_unknown'
-                    WHERE id=(SELECT job FROM attempts WHERE id=?)''', (request['attempt'],))
+                self._hold(run, 'worker_stopped_cost_unknown')
             raise
+
+    def _hold(self, run, reason):
+        """Flag uncertain execution without releasing its attempt lock or money."""
+        if reason not in {'worker_stopped_cost_unknown', 'inference_unknown', 'inference_usage_overrun'}:
+            raise ValueError('Explicit bounded hold reason required')
+        row = self.db.execute('SELECT status FROM execution_runs WHERE run=?', (run,)).fetchone()
+        if row is None:
+            raise ValueError('Unknown execution')
+        if row[0] == 'needs_human':
+            return
+        self.db.execute("UPDATE execution_runs SET status='needs_human',reason=? WHERE run=?", (reason, run))
+        self.db.execute('''UPDATE jobs SET status='needs_human',reason=?
+            WHERE id=(SELECT job FROM attempts WHERE id=(SELECT attempt FROM execution_runs WHERE run=?))''',
+                        (reason, run))
 
     def finish(self, run, successful, actual_microusd=None):
         if type(successful) is not bool:
             raise ValueError('Explicit execution outcome required')
-        row = self.db.execute('SELECT request,status FROM execution_runs WHERE run=?', (run,)).fetchone()
-        if row is None or row[1] not in {'reserved', 'running'}:
-            raise ValueError('Unknown or already reconciled execution')
-        request = json.loads(row[0])
+        if actual_microusd is not None:
+            self.budget._amount(actual_microusd, allow_zero=True)
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            row = self.db.execute('SELECT request,status FROM execution_runs WHERE run=?', (run,)).fetchone()
+            if row is None or row[1] not in {'reserved', 'running'}:
+                raise ValueError('Unknown or already reconciled execution')
+            self.budget.assert_calls_stopped(run)
+            request = json.loads(row[0])
+            allowed = self.can_continue(run)
+            self.db.execute("UPDATE execution_runs SET status='finishing' WHERE run=?", (run,))
         reason = 'execution_complete'
-        allowed = self.can_continue(run)
         if actual_microusd is None:
             reason = 'unknown_cost'
         else:
