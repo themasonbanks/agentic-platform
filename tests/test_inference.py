@@ -66,6 +66,48 @@ class InferenceTests(unittest.TestCase):
     def reserve(self, index=1, output=16):
         return self.allowance.reserve(self.run, format(index, '032x'), DIGEST, 10, output)
 
+    def test_generate_counts_and_dispatches_identical_bytes_once(self):
+        identity = format(1, '032x')
+        counted = []
+        def count_input(payload):
+            counted.append(payload)
+            return 10
+
+        def send(payload):
+            self.assertEqual(counted, [payload])
+            self.assertEqual(self.db.execute('SELECT digest,status FROM inference_calls').fetchone(),
+                             (hashlib.sha256(payload).hexdigest(), 'dispatched'))
+            self.assertEqual(json.loads(payload)['max_output_tokens'], 16)
+            return {'model': self.policy.model, 'status': 'completed',
+                    'usage': {'input_tokens': 10, 'output_tokens': 5}}
+
+        result = self.allowance.generate(self.run, identity, 'private fixture prompt', 16,
+                                         count_input=count_input, send=send)
+        self.assertEqual(result['status'], 'completed')
+        with self.assertRaises(PermissionError):
+            self.allowance.generate(self.run, identity, 'private fixture prompt', 16,
+                                    count_input=count_input, send=send)
+        self.assertEqual(len(counted), 1)
+        self.assertNotIn('private fixture prompt', '\n'.join(self.db.iterdump()))
+
+    def test_generate_blocks_transport_when_input_exceeds_approved_limit(self):
+        with self.assertRaises(ValueError):
+            self.allowance.generate(self.run, format(1, '032x'), 'fixture', 16,
+                                    count_input=lambda payload: 1001,
+                                    send=lambda payload: self.fail('Unexpected dispatch'))
+        self.assertEqual(self.db.execute('SELECT count(*) FROM inference_calls').fetchone()[0], 0)
+
+    def test_generate_transport_failure_holds_attempt_and_allowance(self):
+        def send(payload):
+            raise TimeoutError('private fixture provider error')
+
+        with self.assertRaisesRegex(RuntimeError, '^Provider request outcome is unknown$'):
+            self.allowance.generate(self.run, format(1, '032x'), 'fixture', 16,
+                                    count_input=lambda payload: 10, send=send)
+        self.assertFalse(self.supervisor.can_continue(self.run))
+        self.assertEqual(self.db.execute('SELECT status FROM inference_calls').fetchone(), ('unknown',))
+        self.assertEqual(self.db.execute('SELECT status FROM spend_reservations').fetchone(), ('reserved',))
+
     def test_unique_dispatch_binds_request_and_retains_full_call_capacity(self):
         self.assertTrue(self.reserve())
         self.assertFalse(self.reserve())

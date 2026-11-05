@@ -121,3 +121,40 @@ class InferenceAllowance:
                 raise ValueError('One dispatched call required')
             self.db.execute("UPDATE inference_calls SET status='unknown' WHERE identity=?", (identity,))
             self.supervisor._hold(row[0], 'inference_unknown')
+
+    def generate(self, run, identity, prompt, output_tokens, *, count_input, send):
+        """Fence a synchronous text request through trusted counting and transport."""
+        if (not isinstance(identity, str) or not re.fullmatch('[0-9a-f]{32}', identity)
+                or not isinstance(prompt, str) or not prompt or len(prompt.encode()) > 65536
+                or type(output_tokens) is not int or not 16 <= output_tokens <= self.policy.max_output_tokens):
+            raise ValueError('Bounded text request and unique call identity required')
+        if not self._active(run) or self.db.execute(
+                'SELECT 1 FROM inference_calls WHERE identity=?', (identity,)).fetchone():
+            raise PermissionError('Inference request unavailable')
+        payload = json.dumps({
+            'model': self.policy.model, 'input': prompt, 'max_output_tokens': output_tokens,
+            'store': False, 'stream': False, 'background': False, 'truncation': 'disabled',
+        }, sort_keys=True).encode()
+        digest = hashlib.sha256(payload).hexdigest()
+        input_tokens = count_input(payload)
+        if not self.reserve(run, identity, digest, input_tokens, output_tokens):
+            raise PermissionError('Inference allowance unavailable')
+        if not self.dispatch(identity, digest):
+            self.cancel(identity)
+            raise PermissionError('Inference dispatch unavailable')
+        try:
+            response = send(payload)
+        except Exception:
+            self.uncertain(identity)
+            raise RuntimeError('Provider request outcome is unknown') from None
+        if not isinstance(response, dict) or response.get('model') != self.policy.model:
+            self.uncertain(identity)
+            raise RuntimeError('Provider response identity is unknown')
+        usage = response.get('usage')
+        if not isinstance(usage, dict):
+            usage = {}
+        if not self.complete(identity, usage.get('input_tokens'), usage.get('output_tokens')):
+            raise RuntimeError('Provider usage could not be accepted')
+        if response.get('status') != 'completed' or not self._active(run):
+            raise RuntimeError('Inference result unavailable')
+        return response
