@@ -84,6 +84,7 @@ class AttemptStore:
             encoded = json.dumps(manifest)
             manifest = json.loads(encoded)
             if saved is not None:
+                saved.setdefault('references', [])
                 if manifest != saved:
                     raise ValueError('Attempt already has a different verification manifest')
                 return saved

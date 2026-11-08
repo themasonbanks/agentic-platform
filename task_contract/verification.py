@@ -20,6 +20,7 @@ class Observation:
     source: str
     status: str
     criterion: str | None = None
+    reference: str | None = None
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class Verification:
     checks: tuple[tuple[str, str], ...]
     criteria: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
     decision: str
+    references: tuple[tuple[str | None, str, str], ...]
 
 
 def identify_candidate(task, commit):
@@ -45,6 +47,7 @@ def verify_candidate(task, candidate, checks, evidence, *, attempts_used):
     if type(attempts_used) is not int or not 1 <= attempts_used <= task['limits']['attempts']:
         raise ValueError('Invalid attempt count')
 
+    checks, evidence = tuple(checks), tuple(evidence)
     criteria = {item['id']: item['evidence'] for item in task['criteria']}
     check_status = _statuses(candidate, {(None, name) for name in task['checks']}, checks)
     evidence_status = _statuses(
@@ -63,7 +66,12 @@ def verify_candidate(task, candidate, checks, evidence, *, attempts_used):
         decision = 'escalate'
     else:
         decision = 'repair'
-    return Verification(candidate, check_results, criterion_results, decision)
+    references = tuple(sorted(
+        ((item.criterion, item.source, item.reference)
+         for item in checks + evidence if item.reference is not None),
+        key=lambda item: (item[0] or '', item[1]),
+    ))
+    return Verification(candidate, check_results, criterion_results, decision, references)
 
 
 def _statuses(candidate, expected, observations):
@@ -76,5 +84,8 @@ def _statuses(candidate, expected, observations):
             raise ValueError('Unexpected or duplicate result source')
         if observation.status not in {'passed', 'failed', 'blocked'}:
             raise ValueError('Invalid result status')
+        if observation.reference is not None and not re.fullmatch(
+                r'actions/runs/[1-9][0-9]{0,19}/job/[1-9][0-9]{0,19}', observation.reference):
+            raise ValueError('Invalid evidence reference')
         result[key] = observation.status
     return result
