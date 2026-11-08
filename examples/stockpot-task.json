@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "issue": "KEB-122",
+  "repository": "themasonbanks/stockpot",
+  "branch": "keb-122/working-agreement",
+  "worktree": "stockpot-platform",
+  "intent": "Document the project working agreement.",
+  "criteria": [
+    {
+      "id": "working-agreement",
+      "description": "The agreement describes review and check expectations.",
+      "evidence": [
+        "reviewed-diff"
+      ]
+    }
+  ],
+  "paths": [
+    "docs/platform-delivery-evidence.md"
+  ],
+  "tools": [
+    "read",
+    "edit",
+    "check",
+    "draft_pr"
+  ],
+  "checks": [
+    "diff-check"
+  ],
+  "limits": {
+    "attempts": 2,
+    "runtime_seconds": 120,
+    "cost_microusd": 0
+  },
+  "human_gates": [
+    "draft-approval"
+  ],
+  "terminal_outcomes": [
+    "verified",
+    "blocked",
+    "cancelled",
+    "failed"
+  ]
+}
