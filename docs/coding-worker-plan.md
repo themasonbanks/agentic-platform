@@ -1,0 +1,59 @@
+# Coding worker integration plan
+
+The coding executor remains unimplemented and disabled. Official Codex non-interactive guidance supports codex exec with JSONL events and structured final output. On GitHub Actions it recommends the Codex GitHub Action, which brokers model requests through a Responses API proxy, rather than placing an API key in the environment of repository-controlled code.
+
+Use a dedicated approved automation identity and a scoped secret reference. Never copy the desktop account's auth.json into public-repository CI. The official guidance explicitly excludes that account-auth workflow for public/open-source repositories. No credentials have been inspected, copied or exported for this proposal; only CLI help was read. API-key automation is separately billed and needs the owner's explicit monthly ceiling and model choice before a paid test.
+
+## Proposed execution boundary
+
+The owner approved £5 per calendar month for automated coding-model calls on 2 November 2026, separately from cloud development costs. The current ledger counts micro-USD, so enabling it requires a trusted conservative conversion that includes applicable fees and rounds the available allowance down. Do not configure £5 as $5, infer a current exchange rate or let repository input choose conversion/pricing. Missing or expired conversion evidence must block paid execution. The approved amount does not enable the worker or replace the identity, model, token/runtime and dry-run gates below.
+
+1. Trusted webhook intake authenticates delivery, refetches current review metadata, commits durable work and produces only references.
+2. Trusted coordinator verifies current configuration-bound owner enablement, exact PR head, concurrency/attempt limits and a durable worst-case cost reservation. Unknown price or missing identity/budget blocks execution.
+3. A disposable hosted worker fetches the exact approved head. No GitHub App private key, webhook secret, admin credentials or personal account tokens enter the coding environment. A reviewed model proxy supplies scoped inference access outside untrusted repository processes.
+4. The coding executor has a reviewed pinned version and restricted sandbox, network destinations, file roots, token/output limits and enforced wall timeout. The BusyBox no-network probe establishes a baseline only; it does not verify the required inference-only network gateway or writable coding workspace.
+5. A trusted supervisor takes the actual Git diff, derives its tree/manifest, rejects sensitive paths, and reruns the complete approved check set in a separate isolated environment. It records sanitized metadata and explicit unknown costs without persisting prompts/review bodies.
+6. A separate publisher authenticates as the approved App and atomically updates only the same PR branch against the reviewed head. No approval/merge endpoint or bypass permission is granted. Head changes, disagreements, sensitive patches, cost overruns and exhausted attempts require human intervention.
+7. Before autonomy, perform and obtain owner approval of five real dry-run artifacts under that exact configuration, then separately enable the gate. The current unit-test records are not those approvals.
+
+## Remaining evidence
+
+Before configuring any paid invocation, review the exact GitHub Action implementation/version and permissions, choose the model and known price/budget, and agree the App/endpoint/agent identity. Then verify end-to-end synthetic finding -> isolated fix -> trusted checks -> same-branch push -> hosted CI -> sanitized explanation. Test malicious text, races, retries, process termination, unknown prices and credential exposure. The current libraries and fixed container probes are supporting components, not proof of this flow.
+
+Owner account setup still blocks live AWS deployment, Sentry and Grafana verification. Existing board assignments KEB-123/126/129 remain the owner action list. KEB-128 remains In Progress; this plan does not replace its full acceptance criteria.
+
+Sources checked 1 November 2026:
+- https://learn.chatgpt.com/docs/non-interactive-mode
+- https://learn.chatgpt.com/docs/auth
+
+## Container execution adapter
+
+ContainerWorker is a disabled-service integration component, not a configured Codex coding runner. A trusted controller supplies a preloaded digest-pinned Linux image, an absolute image command and an explicit immutable source-byte snapshot. The adapter never traverses or mounts a host checkout, reads an auth file, pulls an image or passes host environment credentials. The caller must still derive and verify that snapshot from the approved Git head; an arbitrary working-tree copy is not sufficient. Images must contain reviewed /bin/sh, /bin/date, /bin/sleep and /bin/tar implementations and no declared volumes. No approved coding image or model gateway is configured here.
+
+The snapshot accepts at most 1,000 ordinary files, 1 MiB per file and 16 MiB total source content, serialized into at most 20 MiB. Paths, executable modes, file/directory conflicts and credential-state directories/names are validated; symlinks/submodules and oversized or sensitive context require manual integration. It copies only supplied bytes into a container-private 256 MiB tmpfs. Host Git objects, configuration, hooks, sockets and ignored files are not mounted. The worker has a separate 64 MiB temporary area, read-only root, no network, no capabilities, no privilege escalation, private namespaces, 512 MiB memory with no extra swap, one CPU and 64 PIDs. Docker logging is disabled; stdout/stderr retain the existing combined 256 KiB limit. Workload stdout remains untrusted and is not automatically a validated patch or check result.
+
+A fixed watchdog runs as UID 65533; the workload and source extraction run as UID 65534. The workload cannot signal the watchdog. The watchdog uses a bounded absolute expiry and exits even if the host controller dies; Docker exec processes require a running PID 1. Host-side monotonic deadlines and fresh owner guards remain active during image inspection, creation, staging and execution. Cleanup runs despite revocation and must verify the named container is absent before a result returns. Removal/verification has a five-second grace; uncertainty raises ProcessStopped, preserving the supervisor's attempt lock and cost reservation. A stopped container left by controller death still needs authenticated stale-container removal; the deadline label permits inventory, but no automatic deletion service is deployed.
+
+Local tests cover archive validation, immutable source bytes and binary-input boundaries. Mandatory disposable Linux probes exercise mutable source files without host credentials/network/root writes, inability to stop the watchdog, actual cgroup configuration, detached children, deadlines, output floods, revocation and a killed controller. Hosted run 41432855193 passed all six real Docker probes on ecd0ce8, including the killed-controller watchdog. The first run exposed an unsupported literal PID mode; the adapter now explicitly selects Docker's empty/default private PID namespace, and the deadline test requires a started workload. These use only harmless BusyBox fixture commands and synthetic source, not owner-approved dry runs or model calls. The complete coding image, inference-only gateway with hard token/GBP budget enforcement, independent exact-tree checks, publisher flow, crash recovery and five real owner approvals remain required before autonomous enablement.
+
+Docker process/environment semantics: https://docs.docker.com/reference/cli/docker/container/exec/ and https://docs.docker.com/reference/cli/docker/container/run/ .
+
+## Committed source bridge
+
+GitContainerWorker binds the controller's approved repository name and exact 40-character head to the execution request before any container is created. Within the same overall monotonic deadline, committed_files verifies checkout root/head, rejects partial-clone configuration by key name (without retrieving configuration values), enumerates bounded Git tree metadata and reads each raw immutable blob by object ID. The read commands disable ambient global/system Git configuration, replacement objects, lazy fetch, optional index locks, hooks, filesystem monitoring and default network protocols. Partial clones fail before blob reads. Configured clean/smudge filters are not applied because neither working files nor filtered Git output are requested.
+
+Source path/mode/count/size policy is checked before reading blob contents. Missing objects, symlinks, gitlinks, oversized or sensitive context require manual integration; no fallback reads a dirty file, ignored .env file, global credential file or another checkout. The source head is checked again after capture, and request repository/head must match the controller's binding. The container adapter receives only validated committed bytes. The controller still needs an authenticated approved-repository fetch and current review revalidation; local Git capture does not grant App access or prove a live provider installation.
+
+The trusted command runner now permits a caller-selected output cap up to 1 MiB for these known-size blob reads. Coding/container output remains at its unchanged 256 KiB default, and JSON requests remain bounded to 16 KiB. All 156 local non-Docker tests pass; seven Docker cases are mandatory in hosted CI. New real-Git tests cover dirty/ignored local state, index preservation, a 512 KiB binary, executable mode, replacement commits, configured clean-filter nonexecution, partial clones, mismatched request/head, revocation, symlinks/gitlinks and oversized blobs. Hosted run 41434734391 passed all seven Docker probes, including committed Git source reaching the container despite different dirty and ignored host files.
+
+## Per-request model allowance
+
+Before a trusted broker can dispatch a request, it must count tokens for the exact payload and reserve the rounded-up worst-case input and output cost within the run's existing monthly reservation. The approved policy binds the model, price reference, limits and expiry. Each run also records its approved configuration fingerprint. A new approval cannot authorize a run created under an older configuration.
+
+The ledger binds each dispatch to a unique call and payload digest. Concurrent requests share one allowance. Completed requests retain their worst-case allocation until run reconciliation. Only undispatched calls can be cancelled. Unknown outcomes retain the attempt lock and reservation. A provider reporting usage above its limits or reconciled spending above the ceiling stops additional work in the affected UTC month.
+
+This control still needs a trusted provider broker, authenticated request binding and verified currency and fee handling for the approved £5 limit. The ledger records counts and digests without storing prompts or responses.
+
+The synchronous text request path uses the same immutable payload for token counting and dispatch. It selects the approved model, sets the output limit and checks the returned model and usage before returning a completed result. A transport timeout holds the run for reconciliation. The trusted counter must be non-billable or independently budgeted. The transport must enforce the run deadline and make one bounded request with retries disabled. Provider connection and credentials are still pending.
+
+Before publication, the controller derives the proposed tree from the validated patch and runs each required command in a fresh container seeded from that tree. It issues check evidence only after every command exits successfully and the execution guard remains active. The controller must supply an approved image and check commands whose assertions cannot be changed by the patch. Hosted CI exercises this boundary with a disposable Git repository and pinned image.
