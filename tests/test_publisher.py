@@ -6,10 +6,12 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from remediation.enablement import Enablement
 from remediation.git_patch import inspect_patch
 from remediation.intake import Review
 from remediation.publisher import Publisher
+from remediation.process import ProcessStopped
 from remediation.publishing import CheckEvidence
 
 
@@ -60,6 +62,35 @@ class PublisherTests(unittest.TestCase):
     def publish(self):
         return self.publisher.publish('owner/app', 3, 9, self.head, self.root, self.patch,
                                       self.evidence, {'tests'}, {'src'})
+
+    def checked_publish(self, keep_going):
+        return self.publisher.check_and_publish(
+            'owner/app', 3, 9, self.head, self.root, self.patch, {'src'},
+            {'tests': ('/bin/check',)}, '/usr/bin/docker', 'fixture-image', 30, keep_going)
+
+    def test_checked_publication_requires_success_and_active_execution(self):
+        self.gate.set_enabled(42, True, self.config)
+        with patch('remediation.publisher.check_patch', side_effect=ProcessStopped('check failed')):
+            with self.assertRaises(ProcessStopped):
+                self.checked_publish(lambda: True)
+        with patch('remediation.publisher.check_patch', return_value=self.evidence):
+            with self.assertRaises(PermissionError):
+                self.checked_publish(lambda: False)
+            self.assertEqual(self.calls, [])
+            self.assertEqual(self.checked_publish(lambda: True)['tree'], self.tree)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_finding_edited_during_checks_never_publishes(self):
+        self.gate.set_enabled(42, True, self.config)
+
+        def check(*args):
+            self.review = replace(self.review, body='Changed finding')
+            return self.evidence
+
+        with patch('remediation.publisher.check_patch', side_effect=check):
+            with self.assertRaisesRegex(ValueError, 'changed during checks'):
+                self.checked_publish(lambda: True)
+        self.assertEqual(self.calls, [])
 
     def test_disabled_until_owner_switch_then_exact_atomic_payload(self):
         with self.assertRaises(PermissionError):

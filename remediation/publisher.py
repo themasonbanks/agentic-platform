@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from remediation.checks import check_patch
 from remediation.git_patch import inspect_patch
 from remediation.intake import disposition
 from remediation.publishing import authorize_publication
@@ -35,9 +36,22 @@ class Publisher:
             raise ValueError('Current approved finding and unchanged PR head required')
         return review
 
-    def publish(self, repository, pr, comment, expected_head, workspace, patch,
-                evidence, required_checks, allowed_roots):
+    def check_and_publish(self, repository, pr, comment, expected_head, workspace, patch,
+                          allowed_roots, checks, docker_binary, image, seconds, keep_going):
+        """Verify the proposed tree before attempting a branch update."""
         review = self._review(repository, pr, comment, expected_head)
+        required_checks = dict(checks)
+        evidence = check_patch(workspace, expected_head, patch, allowed_roots, required_checks,
+                               docker_binary, image, seconds, keep_going)
+        return self.publish(repository, pr, comment, expected_head, workspace, patch,
+                            evidence, required_checks, allowed_roots,
+                            keep_going=keep_going, expected_review=review)
+
+    def publish(self, repository, pr, comment, expected_head, workspace, patch,
+                evidence, required_checks, allowed_roots, *, keep_going=None, expected_review=None):
+        review = self._review(repository, pr, comment, expected_head)
+        if expected_review is not None and review != expected_review:
+            raise ValueError('Review target changed during checks')
         tree, files = inspect_patch(workspace, expected_head, patch, allowed_roots)
         authorize_publication(expected_head, review.head_sha, tree, evidence, required_checks)
         additions, total = [], 0
@@ -70,6 +84,8 @@ class Publisher:
             raise ValueError('Review target changed during preparation')
         if not self.enablement.enabled(self.configuration):
             raise PermissionError('Publication enablement was revoked')
+        if keep_going is not None and not keep_going():
+            raise PermissionError('Publication execution expired or was revoked')
         response = self.api('/graphql', {'query': CREATE_COMMIT, 'variables': {'input': {
             'branch': {'repositoryNameWithOwner': repository, 'refName': review.branch},
             'expectedHeadOid': expected_head,
